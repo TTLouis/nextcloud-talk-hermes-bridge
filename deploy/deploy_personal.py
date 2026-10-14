@@ -25,6 +25,8 @@ for name in ['compose.yaml','.env','build-lock.json']:
     backup=root/(name+'.v1')
     if not backup.exists():shutil.copy2(root/name,backup)
 old=json.loads((secret/'runner-ttauth.json').read_text());bridge=json.loads((secret/'bridge.json').read_text())
+old['chat_model']='gpt-6.1-sol'
+old['allowed_chat_models']=['gpt-6.1-sol','gpt-5.6-terra']
 account=secret/'assistant-account.json'
 if account.exists():a=json.loads(account.read_text())
 else:
@@ -47,7 +49,7 @@ for folder in ['control-ttauth','workspace-ttauth','state-delivery']:(root/folde
 rooms=[old['room']]
 connector={**old,'rooms':rooms,'assistant_uid':a['uid'],'worker_url':'http://hermes-talk-worker-ttauth:8790',
     'worker_token':a['worker_token'],'delivery_url':'http://hermes-talk-delivery:8792','delivery_token':a['delivery_token'],'bot_id':1,'project_name':'个人助理'}
-worker={'uid':old['uid'],'rooms':rooms,'runner_token':a['worker_token'],'connector_url':'http://hermes-talk-runner-ttauth:8789','chat_model':old['chat_model']}
+worker={'uid':old['uid'],'rooms':rooms,'runner_token':a['worker_token'],'connector_url':'http://hermes-talk-runner-ttauth:8789','chat_model':old['chat_model'],'allowed_chat_models':old['allowed_chat_models']}
 delivery={'assistant_uid':a['uid'],'assistant_token':a['app_token'],'nextcloud_url':old['nextcloud_url'],
     'tenants':[{'uid':old['uid'],'rooms':rooms,'token':a['delivery_token']}]}
 write(secret/'connector-ttauth.json',connector);write(secret/'worker-ttauth.json',worker);write(secret/'delivery.json',delivery)

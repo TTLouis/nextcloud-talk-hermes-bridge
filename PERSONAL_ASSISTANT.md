@@ -40,12 +40,45 @@ owner can answer, the first valid choice wins, and removal/repeated/opposite
 reactions cannot execute the operation again. A general question answer never
 grants drive-reading or saving permission.
 
+Ordinary answers, status updates and control confirmations are top-level
+messages in the primary conversation, without automatically quoting the user's
+last request. In dedicated tasks they use the task's thread membership without
+quoting each individual message. Cards retain their exact operation/context
+binding in private state; a quoted reply is not used as authorization evidence.
+
+## Text model choices
+
+The initial per-user default is `gpt-6.1-sol`. The approved menu also offers
+`gpt-5.6-terra`; this list is operator-controlled and bounded, never an arbitrary
+model name or HTTP endpoint supplied by the agent.
+
+Send `模型`, `模型设置`, `切换模型` or `/model` to open a deterministic two-stage
+reaction card. First choose personal default, this conversation/thread's next
+task, clear the pending single-use override, or cancel; then choose the model.
+The personal default applies across that user's projects. A single-use override
+is bound to the exact UID/room/thread and consumed by the next valid agent
+request there, including its automatic handoff and question-choice continuations.
+Consent, save, menu and other control operations do not consume it. Another
+conversation cannot consume it. The next independent request uses the personal
+default again. A new menu supersedes older menus in the same context.
+
+Preferences and pending overrides persist in the user's Connector database.
+Each task receives an immutable model receipt before its grant is issued;
+changing the default does not alter a running task. Handoff inheritance must
+match a registered handoff relationship; question continuations use the stored
+origin job. Duplicate job dispatch reuses its receipt without consuming another
+override. Worker CLI uses an explicit approved `--model` even when resuming the
+same Hermes session, and the Connector proxy accepts only that task's frozen
+model. Model choice never grants reading/saving permission or changes credentials.
+
 Optional Talk commands:
 
 - `新项目 名称`: create a private project with the owner, delivery-only assistant
   and registered bot. Unknown rooms remain denied by the Bridge.
 - `新任务 标题`: create a real named task thread. Enter that thread to continue.
 - `项目列表`, `任务列表`, `帮助`: deterministic navigation without a model call.
+- `模型` or `/model`: personal-default and next-task model choice cards, without
+  an inference request.
 - `同意读取网盘`, `暂不授权`, `撤销网盘授权`: explicit user-owned read consent.
 - `保存 <artifact-id>`, `不保存 <artifact-id>`: decide about a delivered result
   in its own task thread. Save asks show the proposed destination first.
@@ -161,7 +194,7 @@ room: signed ingress still requires the stable UID and registered project, and
 connectors/delivery recheck the exact owner/helper participant set.
 
 Use `python -m unittest discover -s tests/secure -v` and the no-network disposable
-bridge-image test for 46 contracts. Actual endpoint tests cover native project
+bridge-image test for 57 contracts. Actual endpoint tests cover native project
 creation, rename, emoji/PNG avatar, assistant-authored thread attachment, correct
 owner download and negative permissions. A real task exercises MCP download,
 terminal calculation, text artifact delivery and process exit. A natural main

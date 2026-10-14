@@ -19,7 +19,7 @@ class Bridge(BaseBridge):
             columns={r['name'] for r in db.execute('PRAGMA table_info(jobs)')}
             if 'thread' not in columns:db.execute('ALTER TABLE jobs ADD COLUMN thread INTEGER NOT NULL DEFAULT 0')
             if 'decision' not in columns:db.execute('ALTER TABLE jobs ADD COLUMN decision TEXT')
-            for name,kind in [('parent_room','TEXT'),('parent_thread','INTEGER'),('parent_handoff','TEXT'),('reply_room','TEXT'),('reply_thread','INTEGER')]:
+            for name,kind in [('parent_room','TEXT'),('parent_thread','INTEGER'),('parent_handoff','TEXT'),('reply_room','TEXT'),('reply_thread','INTEGER'),('model_parent_job','TEXT')]:
                 if name not in columns:db.execute('ALTER TABLE jobs ADD COLUMN '+name+' '+kind)
             db.execute('CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY,room TEXT,message TEXT,reply INTEGER,thread INTEGER,title TEXT,status TEXT,next_attempt REAL,attempts INTEGER)')
             notification_columns={r['name'] for r in db.execute('PRAGMA table_info(notifications)')}
@@ -92,6 +92,7 @@ class Bridge(BaseBridge):
         elif message.startswith('新项目 '):
             kind='create_project';prompt=message[4:].strip()
         elif message in ('项目列表','任务列表','帮助','使用指南','重新介绍'):kind='help'
+        elif message in ('模型','模型设置','切换模型','/model'):kind='model_menu'
         else:
             match=re.fullmatch(r'(保存|不保存|确认操作)\s+([a-f0-9]{12})',message)
             if match:kind={'保存':'save','不保存':'discard','确认操作':'confirm'}[match[1]];artifact=match[2]
@@ -137,9 +138,11 @@ class Bridge(BaseBridge):
             body=urllib.parse.urlencode(fields).encode(),headers={'OCS-APIRequest':'true','Content-Type':'application/x-www-form-urlencoded',
             'X-Nextcloud-Talk-Bot-Random':nonce,'X-Nextcloud-Talk-Bot-Signature':signature},limit=65536)
 
-    def queue_message(self,job,sequence,message,reply=0,thread=0,title=None,room=None):
+    def queue_message(self,job,sequence,message,reply=0,thread=None,title=None,room=None,quote=False):
         ident=job['id']+'-'+str(sequence)
         destination=room or job['reply_room'] or job['room']
+        thread=thread if thread is not None else job['reply_thread'] if job['reply_room'] else job['thread']
+        if not quote:reply=0
         with self.db() as db:db.execute('INSERT OR IGNORE INTO notifications (id,room,message,reply,thread,title,status,next_attempt,attempts) VALUES (?,?,?,?,?,?,?,?,?)',
             (ident,destination,message,reply,thread,title,'pending',0,0))
 
@@ -149,6 +152,15 @@ class Bridge(BaseBridge):
         self.queue_message(job,sequence,message,thread=target_thread,room=destination)
         data={'uid':job['uid'],'execution_room':job['room'],'execution_thread':job['thread'],'options':options,'group':group}
         with self.db() as db:db.execute('UPDATE notifications SET choice=? WHERE id=?',(json.dumps(data),job['id']+'-'+str(sequence)))
+
+    def queue_model_card(self,job,sequence,card):
+        group='models:'+job['room']+':'+str(job['thread'])
+        with self.db() as db:
+            db.execute("UPDATE choices SET status='resolved' WHERE uid=? AND choice_group=? AND status='pending'",(job['uid'],group))
+            for row in db.execute("SELECT id,choice FROM notifications WHERE status='pending' AND choice IS NOT NULL").fetchall():
+                choice=json.loads(row['choice'])
+                if choice['uid']==job['uid'] and choice['group']==group:db.execute("UPDATE notifications SET status='cancelled' WHERE id=?",(row['id'],))
+        self.queue_choice(job,sequence,card['text'],card['options'],group)
 
     def react(self,room,message_id,emoji):
         nonce=os.urandom(32).hex();signature=hmac.new(self.config['bot_secret'].encode(),(nonce+emoji).encode(),hashlib.sha256).hexdigest()
@@ -161,8 +173,8 @@ class Bridge(BaseBridge):
         target=handoff['target_room'];thread=handoff['target_thread']
         if (job['uid'],target) not in self.bindings or type(thread) is not int or thread<=0:raise Denied('Wrong handoff target')
         child,_=self.enqueue((job['uid'],target,thread,handoff['prompt'],thread))
-        with self.db() as db:db.execute('UPDATE jobs SET parent_room=?,parent_thread=?,parent_handoff=? WHERE id=?',
-            (job['room'],job['thread'],handoff['id'],child))
+        with self.db() as db:db.execute('UPDATE jobs SET parent_room=?,parent_thread=?,parent_handoff=?,model_parent_job=? WHERE id=?',
+            (job['room'],job['thread'],handoff['id'],job['id'],child))
         return child
 
     def flush_notification(self):
@@ -213,17 +225,20 @@ class Bridge(BaseBridge):
                     with self.db() as db:db.execute("UPDATE jobs SET status='done' WHERE id=?",(job['id'],))
                     return True
                 projects=self.refresh(job['uid'])
-                message=INTRO+'\n\n项目：\n'+'\n'.join('• '+p['name'] for p in projects)+'\n\n也可使用「新项目 名称」「新任务 标题」手动组织。\n网盘：同意读取网盘／暂不授权／撤销网盘授权。\n附件：保存 编号／不保存 编号。\n项目修改：确认操作 编号。'
+                message=INTRO+'\n\n项目：\n'+'\n'.join('• '+p['name'] for p in projects)+'\n\n发送「模型」或「/model」打开模型选择卡。\n也可使用「新项目 名称」「新任务 标题」手动组织。\n网盘：同意读取网盘／暂不授权／撤销网盘授权。\n附件：保存 编号／不保存 编号。\n项目修改：确认操作 编号。'
                 self.queue_message(job,0,message,job['message_id']);result={}
             else:
                 _,result=json_request(b['runner_url']+'/execute',method='POST',headers={'Authorization':'Bearer '+b['runner_token']},
                     body={'uid':job['uid'],'room':job['room'],'thread':job['thread'],'message_id':job['message_id'],
-                    'job_id':job['id'],'kind':job['kind'],'prompt':job['prompt'],'artifact':job['artifact'],'decision':job['decision']},timeout=700,limit=65536)
+                    'job_id':job['id'],'kind':job['kind'],'prompt':job['prompt'],'artifact':job['artifact'],'decision':job['decision'],
+                    'inherit_model_from':job['model_parent_job'],'handoff_id':job['parent_handoff']},timeout=700,limit=65536)
                 if result.get('new_project'):self.refresh(job['uid'])
                 if job['kind']=='consent' and result.get('onboarding_complete') is True:
                     if self.release_onboarding(job['uid']):result['message']+='\n我会按顺序继续你刚才的请求。'
                 text=result.get('message','')
                 sequence=0
+                if result.get('model_card'):
+                    self.queue_model_card(job,sequence,result['model_card']);sequence+=1
                 if result.get('requires_consent'):
                     awaiting_onboarding=True
                     with self.db() as db:waiting=db.execute("SELECT id FROM jobs WHERE uid=? AND status='awaiting_onboarding' LIMIT 1",(job['uid'],)).fetchone()

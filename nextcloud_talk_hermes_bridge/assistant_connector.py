@@ -22,8 +22,9 @@ from .assistant_cloud import Cloud
 from .assistant_context import context_key,task_workspace,read_workspace,write_workspace,relative_path
 from .assistant_onboarding import FIRST_USE
 from .assistant_titles import conversation_title
+from .assistant_models import ModelSettings
 
-class Connector:
+class Connector(ModelSettings):
     def __init__(self,config,state,workspace):
         self.config=config;self.state=Path(state);self.workspace=Path(workspace)
         self.state.mkdir(parents=True,exist_ok=True);self.workspace.mkdir(parents=True,exist_ok=True)
@@ -40,6 +41,7 @@ class Connector:
             db.execute('CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY,room TEXT,thread INTEGER,question TEXT,options TEXT,status TEXT,answer TEXT)')
             for r in config['rooms']:
                 db.execute('INSERT OR IGNORE INTO projects VALUES (?,?)',(r,conversation_title(config.get('project_name','Hermes'),main=r==config['room'])))
+        self.init_models()
 
     @contextmanager
     def db(self):
@@ -72,11 +74,16 @@ class Connector:
         if not self.lock.acquire(False):raise BlockingIOError('Connector busy')
         try:
             kind=p['kind']
+            is_answer=kind=='answer';question_origin=None
+            if kind=='model_menu':return self.model_menu(p)
+            if kind in ('model_scope','model_select'):return self.model_decision(p)
             if kind=='answer':
                 with self.db() as db:
                     q=db.execute('SELECT * FROM questions WHERE id=? AND room=? AND thread=?',(p['artifact'],p['room'],p['thread'])).fetchone()
                     if not q or q['status']!='pending' or p.get('decision') not in json.loads(q['options']):raise PermissionError('No matching pending question')
                     db.execute("UPDATE questions SET status='answered',answer=? WHERE id=?",(p['decision'],q['id']))
+                    origin=db.execute('SELECT origin_job FROM question_models WHERE question_id=?',(q['id'],)).fetchone()
+                    question_origin=origin['origin_job'] if origin else None
                 p={**p,'kind':'task','prompt':'用户通过 reaction 对问题「'+q['question']+'」选择了「'+p['decision']+'」。请在本任务继续处理。此选择只回答该问题，不是网盘读取或保存权限的授权。'}
                 kind='task'
             if kind=='status':
@@ -106,6 +113,8 @@ class Connector:
             p={**p,'project_name':room_info.get('displayName','') if isinstance(room_info,dict) else '',
                'task_name':thread_info.get('thread',{}).get('name','') if p['thread'] else '主助理' if p['room']==self.config['room'] else '项目协调',
                'coordination':p['thread']==0}
+            model=self.assign_task_model(p,question_origin,is_answer)
+            p={**p,'chat_model':model['model'],'task_root':model['root_job']}
             work=task_workspace(self.workspace,self.config['uid'],p['room'],p['thread'])
             token=secrets.token_hex(32)
             with self.grant_lock:self.active={'token':token,'payload':dict(p),'work':work,'expires':time.monotonic()+660,'tools':0,'models':0,'artifacts':[],'proposals':[],'handoffs':[],'questions':[]}
@@ -113,6 +122,7 @@ class Connector:
             try:
                 _,result=json_request(self.config['worker_url']+'/execute',method='POST',timeout=640,limit=65536,
                     headers={'Authorization':'Bearer '+self.config['worker_token']},body={**p,'grant':token})
+                result['model']=model['model'];result['model_source']=model['source']
                 with self.grant_lock:
                     result['artifacts']=list(self.active['artifacts']);result['proposals']=list(self.active['proposals']);result['handoffs']=list(self.active['handoffs']);result['questions']=list(self.active['questions'])
                 with self.db() as db:db.execute('INSERT OR REPLACE INTO task_state VALUES (?,?,?,?,?)',(p['room'],p['thread'],'done',result.get('message','')[:2000],time.time()))
@@ -153,7 +163,9 @@ class Connector:
             if not isinstance(question,str) or not 0<len(question)<=2000:raise ValueError('Invalid question')
             if not isinstance(options,list) or not 2<=len(options)<=5 or len(set(options))!=len(options) or any(not isinstance(s,str) or not 0<len(s)<=120 for s in options):raise ValueError('Invalid options')
             ident=hashlib.sha256((p['job_id']+'\0question').encode()).hexdigest()[:12]
-            with self.db() as db:db.execute('INSERT OR IGNORE INTO questions VALUES (?,?,?,?,?,?,?)',(ident,p['room'],p['thread'],question,json.dumps(options),'pending',None))
+            with self.db() as db:
+                db.execute('INSERT OR IGNORE INTO questions VALUES (?,?,?,?,?,?,?)',(ident,p['room'],p['thread'],question,json.dumps(options),'pending',None))
+                db.execute('INSERT OR IGNORE INTO question_models VALUES (?,?)',(ident,p['job_id']))
             out={'id':ident,'question':question,'options':options}
             with self.grant_lock:
                 if self.active['questions'] and self.active['questions'][0]!=out:raise ValueError('One choice question at a time')
@@ -374,7 +386,7 @@ class Handler(BaseHandler):
             if self.path=='/tools':
                 self.reply(200,self.server.runner.tool(a,data['name'],data.get('arguments',{})));return
             # Fixed destination/routes/models; no arbitrary HTTP proxy and no provider key in worker.
-            if data.get('model')!=self.server.runner.config['chat_model']:raise PermissionError('Unapproved model')
+            self.server.runner.check_task_model(a,data)
             _,response=request(self.server.runner.config['model_url']+self.path[3:],method='POST',body=raw,timeout=240,limit=32*1024*1024,
                 headers={'Content-Type':'application/json','Authorization':'Bearer '+self.server.runner.config['model_token']})
             self.send_response(200);self.send_header('Content-Type','text/event-stream' if data.get('stream') else 'application/json')

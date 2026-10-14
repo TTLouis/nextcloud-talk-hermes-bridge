@@ -22,6 +22,7 @@ class Worker:
         if not re.fullmatch('[a-f0-9]{12}',p.get('job_id','')):raise ValueError('Invalid job')
         if not isinstance(p.get('prompt'),str) or not 0<len(p['prompt'])<=32000:raise ValueError('Invalid prompt')
         if not re.fullmatch('[a-f0-9]{64}',p.get('grant','')):raise ValueError('Invalid task grant')
+        if p.get('chat_model') not in self.config.get('allowed_chat_models',[self.config['chat_model']]):raise PermissionError('Unapproved task model')
         if not self.lock.acquire(False):raise BlockingIOError('Busy')
         try:return self.run(p,key)
         finally:self.lock.release()
@@ -34,8 +35,9 @@ class Worker:
         project=work.parent.parent/'shared';project.mkdir(exist_ok=True)
         python='/opt/hermes/.venv/bin/python'
         connector=self.config['connector_url']
+        model=p['chat_model']
         mcp_env={'ASSISTANT_CONNECTOR':connector,'ASSISTANT_GRANT':p['grant'],'PYTHONPATH':'/app:/opt/hermes'}
-        cfg={'model':{'provider':'custom','base_url':connector+'/v1','default':self.config['chat_model']},
+        cfg={'model':{'provider':'custom','base_url':connector+'/v1','default':model},
              'agent':{'max_turns':24},'database':{'journal_mode':'delete'},
              'memory':{'memory_enabled':True,'user_profile_enabled':False},'display':{'streaming':False},
              'terminal':{'env_type':'local','cwd':str(scratch),'timeout':90},
@@ -64,7 +66,7 @@ class Worker:
              'TERMINAL_CWD':str(scratch),'HERMES_YOLO_MODE':'1','TERM':'dumb','NO_COLOR':'1',**mcp_env}
         # YOLO is confined to this user-owned container. Cloud writes/deletes/shares are not model tools.
         args=[python,'-m','hermes_cli.main','chat','-q',instructions,'--format','stream-json',
-              '--toolsets','file,terminal,todo,memory,assistant','--max-turns','24']
+              '--toolsets','file,terminal,todo,memory,assistant','--max-turns','24','--provider','custom','--model',model]
         session=home/'bridge-session.json'
         if session.exists():
             sid=json.loads(session.read_text()).get('session_id','')
@@ -113,7 +115,7 @@ class Worker:
             session.write_text(json.dumps({'session_id':final['session_id'],'context':key}))
         if not final or proc.returncode or final.get('exit_code'):
             raise RuntimeError('Hermes task failed; private diagnostics retained')
-        return {'message':str(final.get('text','')).strip()[:12000],'context':key}
+        return {'message':str(final.get('text','')).strip()[:12000],'context':key,'model':model}
 
 class Handler(BaseHandler):
     pass
