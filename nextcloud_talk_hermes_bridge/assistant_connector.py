@@ -20,6 +20,7 @@ from .secure_runner import Handler as BaseHandler
 from .secure_common import request,json_request
 from .assistant_cloud import Cloud
 from .assistant_context import context_key,task_workspace,read_workspace,write_workspace,relative_path
+from .assistant_onboarding import FIRST_USE
 
 class Connector:
     def __init__(self,config,state,workspace):
@@ -87,7 +88,7 @@ class Connector:
             if kind=='consent':
                 allowed=p.get('decision')=='allow'
                 with self.db() as db:db.execute('INSERT OR REPLACE INTO consent VALUES (?,?,?)',(self.config['uid'],int(allowed),time.time()))
-                return {'message':'已允许通过 MCP 读取你本人可访问的网盘文件。可随时回复「撤销网盘授权」。请在线程中继续你的任务。' if allowed else '已关闭网盘读取。仍可使用对话、私有工作区和生图。'}
+                return {'onboarding_complete':True,'message':'已允许通过 MCP 按任务读取你本人可访问的网盘文件。可随时发送「撤销网盘授权」关闭。' if allowed else '已关闭网盘读取。仍可对话、使用私有工作区和生图。'}
             if kind in ('save','discard'):return self.decide(p)
             if kind=='confirm':return self.confirm(p)
             if kind=='cancel':
@@ -98,7 +99,7 @@ class Connector:
             if kind=='create_project':return self.project_change({'kind':'create','name':p['prompt']},p)
             if kind!='task':raise ValueError('Invalid action')
             if self.consent() is None:
-                return {'requires_consent':True,'message':'开始前，是否允许我通过 MCP 读取你本人可访问的 Nextcloud 网盘文件（包括共享给你的文件）？只按任务读取，不自动扫描全盘；保存成果另行确认。\n✅ 允许读取　❌ 暂不授权'}
+                return {'requires_consent':True,'message':FIRST_USE}
             # Native room-scoped thread lookup validates that the task actually belongs to this project.
             thread_info=self.nc.ocs('apps/spreed/api/v1/chat/'+p['room']+'/threads/'+str(p['thread'])) if p['thread'] else {}
             p={**p,'project_name':room_info.get('displayName','') if isinstance(room_info,dict) else '',
@@ -330,7 +331,7 @@ class Handler(BaseHandler):
     def do_GET(self):
         if self.path=='/projects':
             if not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+self.server.runner.config['runner_token']):self.reply(401,{});return
-            self.reply(200,{'projects':self.server.runner.projects()});return
+            self.reply(200,{'projects':self.server.runner.projects(),'onboarding_complete':self.server.runner.consent() is not None});return
         super().do_GET()
 
     def do_POST(self):

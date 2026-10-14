@@ -41,6 +41,8 @@ class AssistantTests(unittest.TestCase):
         with mock.patch.object(self.c.nc,'room'),mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.json_request') as req:
             answer=self.c.execute(self.p)
             self.assertTrue(answer['requires_consent']);req.assert_not_called()
+            for phrase in ['个人在线助理','直接告诉我','Docker 私有工作区','暂不授权仍可','你的请求已经保留']:
+                self.assertIn(phrase,answer['message'])
 
     def test_connector_rejects_foreign_user_room_and_save_thread(self):
         for p in [{**self.p,'uid':'bob'},{**self.p,'room':'room456'}]:
@@ -206,5 +208,70 @@ class AssistantTests(unittest.TestCase):
         with mock.patch.object(self.c.nc,'room'),mock.patch.object(self.c.nc,'upload_file') as upload:
             result=self.c.execute({**self.p,'kind':'answer','artifact':'b'*12,'decision':'允许读取并保存'})
             self.assertTrue(result['requires_consent']);self.assertIsNone(self.c.consent());upload.assert_not_called()
+
+    def test_first_request_survives_restart_and_allow_or_decline_resumes_exact_context(self):
+        for decision in ['allow','deny']:
+            with self.subTest(decision=decision):
+                cfg={'assistant_uid':'hermes-assistant','bot_secret':'secret','bindings':[{'uid':'alice','room':'room123','runner_url':'http://connector','runner_token':'x'}]}
+                path=self.root/(decision+'.sqlite');b=Bridge(cfg,path)
+                source,_=b.enqueue(('alice','room123',10,'Please compute 17+25',12))
+                with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',return_value=(200,{'requires_consent':True,'message':'welcome'})):
+                    b.run_one()
+                with b.db() as db:self.assertEqual(db.execute('SELECT status FROM jobs WHERE id=?',(source,)).fetchone()[0],'awaiting_onboarding')
+                b=Bridge(cfg,path)
+                with b.db() as db:
+                    db.execute('INSERT INTO choices VALUES (?,?,?,?,?,?,?,?,?,?)',('room123',100,'alice',12,'room123',12,json.dumps({'✅':{'kind':'consent','decision':decision}}),'consent','pending',None))
+                with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',return_value=(200,{'revoked':True})):
+                    b.enqueue({'reaction':True,'uid':'alice','room':'room123','message_id':100,'emoji':'✅'})
+                replies=[(200,{'onboarding_complete':True,'message':'choice recorded'}),(200,{'message':'42'})]
+                with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',side_effect=replies) as req:
+                    b.run_one();b.run_one()
+                    resumed=req.call_args_list[-1].kwargs['body']
+                    self.assertEqual((resumed['uid'],resumed['room'],resumed['thread'],resumed['prompt'],resumed['job_id']),('alice','room123',12,'Please compute 17+25',source))
+                with b.db() as db:
+                    self.assertEqual(db.execute('SELECT status FROM jobs WHERE id=?',(source,)).fetchone()[0],'done')
+                    self.assertEqual(db.execute('SELECT message FROM notifications WHERE id=?',(source+'-0',)).fetchone()[0],'42')
+
+    def test_repeated_messages_before_first_choice_keep_one_welcome_card(self):
+        b=self.choice_bridge()
+        for mid in [10,11]:b.enqueue(('alice','room123',mid,'request '+str(mid),0))
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',return_value=(200,{'requires_consent':True,'message':'welcome'})):
+            b.run_one();b.run_one()
+        with b.db() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs WHERE status='awaiting_onboarding'").fetchone()[0],2)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM notifications WHERE choice IS NOT NULL').fetchone()[0],1)
+
+    def test_restart_recovers_only_never_run_requests_for_completed_owner(self):
+        b=self.choice_bridge()
+        alice,_=b.enqueue(('alice','room123',10,'first request',0))
+        interrupted,_=b.enqueue(('alice','room123',11,'already attempted',0))
+        with b.db() as db:
+            db.execute("UPDATE jobs SET status='awaiting_onboarding' WHERE id=?",(alice,))
+            db.execute("UPDATE jobs SET status='interrupted' WHERE id=?",(interrupted,))
+            db.execute("INSERT INTO jobs (id,uid,room,message_id,kind,prompt,status,created,thread) VALUES ('foreign','bob','room123',30,'task','private','awaiting_onboarding',0,0)")
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',return_value=(200,{'projects':[{'room':'room123'}],'onboarding_complete':False})):
+            b.refresh('alice')
+        with b.db() as db:self.assertEqual(db.execute('SELECT status FROM jobs WHERE id=?',(alice,)).fetchone()[0],'awaiting_onboarding')
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',return_value=(200,{'projects':[{'room':'room123'}],'onboarding_complete':True})):
+            b.refresh('alice');b.refresh('alice')
+        with b.db() as db:
+            self.assertEqual(db.execute('SELECT status FROM jobs WHERE id=?',(alice,)).fetchone()[0],'queued')
+            self.assertEqual(db.execute('SELECT status FROM jobs WHERE id=?',(interrupted,)).fetchone()[0],'interrupted')
+            self.assertEqual(db.execute("SELECT status FROM jobs WHERE id='foreign'").fetchone()[0],'awaiting_onboarding')
+
+    def test_onboarding_wait_budget_keeps_room_for_explicit_choice(self):
+        b=self.choice_bridge()
+        for mid in range(1,17):
+            ident,_=b.enqueue(('alice','room123',mid,'request',0))
+            with b.db() as db:db.execute("UPDATE jobs SET status='awaiting_onboarding' WHERE id=?",(ident,))
+        with self.assertRaises(Denied):b.enqueue(('alice','room123',17,'more work',0))
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',return_value=(200,{'revoked':True})):
+            self.assertTrue(b.enqueue(('alice','room123',18,'暂不授权',0))[1])
+
+    def test_completed_setup_persists_without_changing_existing_permission(self):
+        with mock.patch.object(self.c.nc,'room'):
+            self.c.execute({**self.p,'kind':'consent','decision':'deny'})
+        restarted=Connector(self.config,self.root/'control',self.root/'workspace')
+        self.assertIs(restarted.consent(),False)
 
 if __name__=='__main__':unittest.main()

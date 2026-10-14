@@ -10,6 +10,7 @@ import time
 import urllib.parse
 from .secure_bridge import Bridge as BaseBridge,Denied,Server
 from .secure_common import request,json_request
+from .assistant_onboarding import INTRO
 
 class Bridge(BaseBridge):
     def __init__(self,config,database):
@@ -31,7 +32,20 @@ class Bridge(BaseBridge):
         b=self.users[uid]
         _,data=json_request(b['runner_url']+'/projects',headers={'Authorization':'Bearer '+b['runner_token']},timeout=8)
         for project in data['projects']:self.bindings[(uid,project['room'])]={**b,'room':project['room']}
+        if data.get('onboarding_complete') is True:self.release_onboarding(uid)
         return data['projects']
+
+    def release_onboarding(self,uid):
+        # These jobs have never launched Hermes. A completed first-use choice
+        # safely releases them; interrupted billable jobs are never retried here.
+        with self.db() as db:
+            resumed=db.execute("UPDATE jobs SET status='queued' WHERE uid=? AND status='awaiting_onboarding'",(uid,)).rowcount
+            db.execute("UPDATE choices SET status='resolved' WHERE uid=? AND choice_group='consent' AND status='pending'",(uid,))
+            for n in db.execute("SELECT id,choice FROM notifications WHERE status='pending' AND choice IS NOT NULL").fetchall():
+                choice=json.loads(n['choice'])
+                if choice['uid']==uid and choice['group']=='consent':
+                    db.execute("UPDATE notifications SET status='cancelled' WHERE id=?",(n['id'],))
+        return resumed
 
     def event(self,payload):
         actor=(payload.get('actor') or {}).get('id','') if isinstance(payload,dict) else ''
@@ -77,12 +91,13 @@ class Bridge(BaseBridge):
             if not 0<len(prompt)<=100:raise Denied('Invalid title')
         elif message.startswith('新项目 '):
             kind='create_project';prompt=message[4:].strip()
-        elif message in ('项目列表','任务列表','帮助'):kind='help'
+        elif message in ('项目列表','任务列表','帮助','使用指南','重新介绍'):kind='help'
         else:
             match=re.fullmatch(r'(保存|不保存|确认操作)\s+([a-f0-9]{12})',message)
             if match:kind={'保存':'save','不保存':'discard','确认操作':'confirm'}[match[1]];artifact=match[2]
         with self.db() as db:
             if db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running')").fetchone()[0]>=16:raise Denied('Queue full')
+            if kind!='consent' and db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running','awaiting_onboarding')").fetchone()[0]>=16:raise Denied('Queue full')
             db.execute('INSERT INTO jobs (id,uid,room,message_id,kind,prompt,artifact,status,created,error,thread,decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (jobid,uid,room,mid,kind,prompt,artifact,'queued',time.time(),None,thread,decision))
         return jobid,True
@@ -186,6 +201,7 @@ class Bridge(BaseBridge):
             db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
         b=self.bindings[(job['uid'],job['room'])]
         try:
+            awaiting_onboarding=False
             if job['kind']=='new_task':
                 self.queue_message(job,0,'任务「'+job['prompt']+'」已建立。请在线程内发送需求；此任务有独立上下文和 scratchpad。首次使用会询问是否允许读取网盘。',title=job['prompt'])
                 result={}
@@ -197,17 +213,23 @@ class Bridge(BaseBridge):
                     with self.db() as db:db.execute("UPDATE jobs SET status='done' WHERE id=?",(job['id'],))
                     return True
                 projects=self.refresh(job['uid'])
-                message='你可以直接对主助理说需求。适合独立跟进的事项，主助理会主动建项目并 handoff；主对话保留。\n项目：\n'+'\n'.join('• '+p['name'] for p in projects)+'\n\n也可使用「新项目 名称」「新任务 标题」手动组织。\n网盘：同意读取网盘／暂不授权／撤销网盘授权。\n附件：保存 编号／不保存 编号。\n项目修改：确认操作 编号。'
+                message=INTRO+'\n\n项目：\n'+'\n'.join('• '+p['name'] for p in projects)+'\n\n也可使用「新项目 名称」「新任务 标题」手动组织。\n网盘：同意读取网盘／暂不授权／撤销网盘授权。\n附件：保存 编号／不保存 编号。\n项目修改：确认操作 编号。'
                 self.queue_message(job,0,message,job['message_id']);result={}
             else:
                 _,result=json_request(b['runner_url']+'/execute',method='POST',headers={'Authorization':'Bearer '+b['runner_token']},
                     body={'uid':job['uid'],'room':job['room'],'thread':job['thread'],'message_id':job['message_id'],
                     'job_id':job['id'],'kind':job['kind'],'prompt':job['prompt'],'artifact':job['artifact'],'decision':job['decision']},timeout=700,limit=65536)
                 if result.get('new_project'):self.refresh(job['uid'])
+                if job['kind']=='consent' and result.get('onboarding_complete') is True:
+                    if self.release_onboarding(job['uid']):result['message']+='\n我会按顺序继续你刚才的请求。'
                 text=result.get('message','')
                 sequence=0
                 if result.get('requires_consent'):
-                    self.queue_choice(job,sequence,text,{'✅':{'kind':'consent','decision':'allow'},'❌':{'kind':'consent','decision':'deny'}},'consent');sequence+=1
+                    awaiting_onboarding=True
+                    with self.db() as db:waiting=db.execute("SELECT id FROM jobs WHERE uid=? AND status='awaiting_onboarding' LIMIT 1",(job['uid'],)).fetchone()
+                    if not waiting:self.queue_choice(job,-1,text,{'✅':{'kind':'consent','decision':'allow'},'❌':{'kind':'consent','decision':'deny'}},'consent')
+                    else:self.queue_message(job,-1,'你的请求已保留。请先在首次欢迎消息下面点 ✅ 或 ❌，我会按顺序继续处理。',job['message_id'])
+                    sequence+=1
                 elif text:
                     for start in range(0,len(text),3000):
                         self.queue_message(job,sequence,text[start:start+3000],job['message_id']);sequence+=1
@@ -233,7 +255,7 @@ class Bridge(BaseBridge):
                 if job['parent_room']:
                     self.queue_message(job,1000,'项目任务有更新：\n'+(result.get('message') or '已返回成果，请到项目线程查看。')[:1500]+'\n项目：'+self.config['nextcloud_url']+'/call/'+job['room'],
                         thread=job['parent_thread'] or 0,room=job['parent_room'])
-            with self.db() as db:db.execute("UPDATE jobs SET status='done' WHERE id=?",(job['id'],))
+            with self.db() as db:db.execute('UPDATE jobs SET status=? WHERE id=?',('awaiting_onboarding' if awaiting_onboarding else 'done',job['id']))
         except Exception as exc:
             with self.db() as db:db.execute("UPDATE jobs SET status='failed',error=? WHERE id=?",(type(exc).__name__,job['id']))
             try:self.queue_message(job,999,'任务未完成（'+job['id']+'）。未自动重试；可以继续说明需求或查看服务状态。',job['message_id'])

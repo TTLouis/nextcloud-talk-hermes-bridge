@@ -51,6 +51,17 @@ Optional Talk commands:
 
 ## Tools, scratchpad and consent
 
+First use shows a deterministic welcome guide covering capabilities, automatic
+project handoff, the meaning of a Talk task thread, Docker scratch storage,
+assistant-owned delivery and reaction choices. The user then chooses ✅ to allow
+task-directed cloud reads or ❌ to continue without them. The first request is
+durably held without launching Hermes and resumes in its original user/project/
+thread after either choice. More requests during setup wait behind the same
+welcome card. Restart recovery releases only never-run setup requests when that
+same user's persisted choice exists; interrupted billable jobs remain stopped.
+Existing granted/declined choices are preserved on upgrade. `使用指南`, `帮助`
+or `重新介绍` displays the guide again without a model call or permission reset.
+
 Hermes runs general local file/terminal/todo/memory tools inside the worker.
 Its MCP facade provides `nextcloud_list`, `nextcloud_read_text`,
 `nextcloud_download`, `assistant_projects`, `handoff_project`, `project_tasks`,
@@ -125,6 +136,14 @@ inside its workspace before proposing an icon change; non-square proposals fail.
 
 ## Operation and evidence
 
+Before enabling a family member, the operator provisions that member's own
+stable UID binding, connector credential, isolated worker/network/volume and
+private main room with the delivery account/bot, then repeats cross-user access
+negative checks. Unknown users/rooms cannot self-enroll through a chat message.
+Account credentials must not be requested in Talk. Only after authorized
+provisioning does the member open their main conversation and complete the
+welcome/reaction flow. A declined read choice still completes onboarding.
+
 Deployment: `/opt/docker/hermes-talk`; use the server's protected `.env` and
 `compose.yaml`. `compose.personal.yaml` is the four-role source template.
 Build Dockerfile.secure targets bridge, connector, worker and delivery, then pin
@@ -139,7 +158,7 @@ room: signed ingress still requires the stable UID and registered project, and
 connectors/delivery recheck the exact owner/helper participant set.
 
 Use `python -m unittest discover -s tests/secure -v` and the no-network disposable
-bridge-image test for 39 contracts. Actual endpoint tests cover native project
+bridge-image test for 44 contracts. Actual endpoint tests cover native project
 creation, rename, emoji/PNG avatar, assistant-authored thread attachment, correct
 owner download and negative permissions. A real task exercises MCP download,
 terminal calculation, text artifact delivery and process exit. A natural main

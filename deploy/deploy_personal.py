@@ -61,6 +61,7 @@ for target in ['bridge','connector','worker','delivery']:
 tests=subprocess.run(['docker','run','--rm','--network','none','--read-only','--tmpfs','/tmp:size=32m,mode=1777',
     '-v',str(root/'tests/secure')+':/tests:ro','--entrypoint','python',images['bridge']['id'],'-m','unittest','discover','-s','/tests','-q'],capture_output=True,text=True,timeout=45)
 assert tests.returncode==0,tests.stderr
+write(root/'contract-tests.json',{'image':images['bridge']['id'],'returncode':tests.returncode,'report':tests.stderr.strip()})
 print(json.dumps({'tests':tests.stderr.strip(),'assistant_non_admin':True,'assistant_password_entropy_bits':512}),flush=True)
 compose=['docker','compose','--env-file',str(root/'.env'),'-f',str(root/'compose.yaml')]
 db=sqlite3.connect(root/'state-bridge/jobs.sqlite')
