@@ -7,3 +7,11 @@ dist/
 build/
 *.egg-info/
 .local/
+
+/runtime/
+/secrets/
+/state-*/
+/review-runtime/
+.env
+*.sqlite
+*.log

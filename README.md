@@ -1,3 +1,5 @@
+> Secure local fork: use [SECURE_DEPLOYMENT.md](SECURE_DEPLOYMENT.md). The upstream instructions below describe the original broad bridge and are retained for provenance only.
+
 # Nextcloud Talk Hermes Bridge
 
 

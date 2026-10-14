@@ -1,16 +1,19 @@
-FROM python:3.11-slim
-
-ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     TALK_BRIDGE_BIND=0.0.0.0     TALK_BRIDGE_PORT=8788     HERMES_PROFILE=default     HERMES_HOME_DIR=/app/hermes-home     TALK_CONTEXT_DIR=/nc_app_hermes_talk_bridge_data/context     TALK_BRIDGE_LOG=/nc_app_hermes_talk_bridge_data/bridge.log
-
-RUN apt-get update     && apt-get install -y --no-install-recommends curl ca-certificates git ffmpeg     && rm -rf /var/lib/apt/lists/*
-
+ARG PYTHON_BASE=python@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170
+FROM ${PYTHON_BASE} AS bridge
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE ./
-COPY nextcloud_talk_hermes_bridge ./nextcloud_talk_hermes_bridge
-RUN python -m pip install --no-cache-dir --upgrade pip     && python -m pip install --no-cache-dir . hermes-agent
+COPY nextcloud_talk_hermes_bridge /app/nextcloud_talk_hermes_bridge
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+USER 1000:1000
+ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.secure_bridge"]
 
-RUN mkdir -p /app/hermes-home /nc_app_hermes_talk_bridge_data
-EXPOSE 8788
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3   CMD python -c "import os, urllib.request; port=os.environ.get('APP_PORT') or os.environ.get('TALK_BRIDGE_PORT','8788'); urllib.request.urlopen(f'http://127.0.0.1:{port}/heartbeat', timeout=3).read()"
-
-ENTRYPOINT ["python", "-m", "nextcloud_talk_hermes_bridge.bridge"]
+FROM ${PYTHON_BASE} AS runner
+WORKDIR /opt/hermes
+COPY runtime/hermes /opt/hermes
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 HERMES_HOME=/tmp/hermes-build HERMES_RUNTIME_DIR=/opt/hermes/tools
+RUN python -m pm.build_env --source /opt/hermes --python /usr/local/bin/python \
+    --out /opt/hermes/.venv --no-install-project --sealed --record-selection --extra mcp
+WORKDIR /app
+COPY nextcloud_talk_hermes_bridge /app/nextcloud_talk_hermes_bridge
+ENV PYTHONPATH=/app:/opt/hermes HERMES_HOME=/state/hermes
+USER 1000:1000
+ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.secure_runner"]
