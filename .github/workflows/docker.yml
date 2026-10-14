@@ -24,4 +24,6 @@ jobs:
           path: runtime/hermes
           persist-credentials: false
       - run: docker build --target bridge -f Dockerfile.secure -t local/hermes-talk-bridge:checked .
-      - run: docker build --target runner -f Dockerfile.secure -t local/hermes-talk-runner:checked .
+      - run: docker build --target connector -f Dockerfile.secure -t local/hermes-talk-connector:checked .
+      - run: docker build --target worker -f Dockerfile.secure -t local/hermes-talk-worker:checked .
+      - run: docker build --target delivery -f Dockerfile.secure -t local/hermes-talk-delivery:checked .

@@ -1,4 +1,4 @@
-> Secure local fork: use [SECURE_DEPLOYMENT.md](SECURE_DEPLOYMENT.md). The upstream instructions below describe the original broad bridge and are retained for provenance only.
+> Maintained personal-assistant fork: use [PERSONAL_ASSISTANT.md](PERSONAL_ASSISTANT.md) and [SECURE_DEPLOYMENT.md](SECURE_DEPLOYMENT.md). The upstream instructions below are historical provenance, not current deployment instructions.
 
 # Nextcloud Talk Hermes Bridge
 

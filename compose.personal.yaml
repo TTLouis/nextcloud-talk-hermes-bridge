@@ -1,0 +1,237 @@
+{
+  "name": "hermes-talk",
+  "services": {
+    "bridge": {
+      "image": "${BRIDGE_IMAGE:?Set immutable image ID}",
+      "pull_policy": "never",
+      "container_name": "hermes-talk-bridge",
+      "restart": "unless-stopped",
+      "init": true,
+      "user": "1000:1000",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "128m",
+      "memswap_limit": "128m",
+      "cpus": 0.5,
+      "pids_limit": 96,
+      "tmpfs": [
+        "/tmp:size=128m,mode=1777"
+      ],
+      "volumes": [
+        "./secrets/bridge-v2.json:/run/config/bridge.json:ro",
+        "./state-bridge:/state"
+      ],
+      "networks": [
+        "nextcloud",
+        "jobs"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8788/heartbeat',timeout=3).read()"
+        ],
+        "interval": "30s",
+        "timeout": "5s",
+        "retries": 3
+      },
+      "logging": {
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "extra_hosts": [
+        "nextcloud.direct.ttlouis.space:host-gateway"
+      ],
+      "depends_on": {
+        "runner-ttauth": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "runner-ttauth": {
+      "image": "${CONNECTOR_IMAGE:?Set immutable image ID}",
+      "pull_policy": "never",
+      "container_name": "hermes-talk-runner-ttauth",
+      "restart": "unless-stopped",
+      "init": true,
+      "user": "1000:1000",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "256m",
+      "memswap_limit": "256m",
+      "cpus": 0.5,
+      "pids_limit": 96,
+      "tmpfs": [
+        "/tmp:size=128m,mode=1777"
+      ],
+      "volumes": [
+        "./secrets/connector-ttauth.json:/run/config/connector.json:ro",
+        "./control-ttauth:/state",
+        "./workspace-ttauth:/workspace"
+      ],
+      "networks": [
+        "nextcloud",
+        "jobs",
+        "models",
+        "worker-ttauth",
+        "delivery-calls"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8789/heartbeat',timeout=3).read()"
+        ],
+        "interval": "30s",
+        "timeout": "5s",
+        "retries": 3
+      },
+      "logging": {
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "extra_hosts": [
+        "nextcloud.direct.ttlouis.space:host-gateway"
+      ],
+      "depends_on": {
+        "worker-ttauth": {
+          "condition": "service_healthy"
+        },
+        "delivery": {
+          "condition": "service_healthy"
+        }
+      }
+    },
+    "worker-ttauth": {
+      "image": "${WORKER_IMAGE:?Set immutable image ID}",
+      "pull_policy": "never",
+      "container_name": "hermes-talk-worker-ttauth",
+      "restart": "unless-stopped",
+      "init": true,
+      "user": "1000:1000",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "1g",
+      "memswap_limit": "1g",
+      "cpus": 1,
+      "pids_limit": 96,
+      "tmpfs": [
+        "/tmp:size=128m,mode=1777"
+      ],
+      "volumes": [
+        "./secrets/worker-ttauth.json:/run/config/worker.json:ro",
+        "./workspace-ttauth:/workspace"
+      ],
+      "networks": [
+        "worker-ttauth"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8790/heartbeat',timeout=3).read()"
+        ],
+        "interval": "30s",
+        "timeout": "5s",
+        "retries": 3
+      },
+      "logging": {
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      }
+    },
+    "delivery": {
+      "image": "${DELIVERY_IMAGE:?Set immutable image ID}",
+      "pull_policy": "never",
+      "container_name": "hermes-talk-delivery",
+      "restart": "unless-stopped",
+      "init": true,
+      "user": "1000:1000",
+      "read_only": true,
+      "cap_drop": [
+        "ALL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "mem_limit": "256m",
+      "memswap_limit": "256m",
+      "cpus": 0.5,
+      "pids_limit": 96,
+      "tmpfs": [
+        "/tmp:size=128m,mode=1777"
+      ],
+      "volumes": [
+        "./secrets/delivery.json:/run/config/delivery.json:ro",
+        "./state-delivery:/state"
+      ],
+      "networks": [
+        "nextcloud",
+        "delivery-calls"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8792/heartbeat',timeout=3).read()"
+        ],
+        "interval": "30s",
+        "timeout": "5s",
+        "retries": 3
+      },
+      "logging": {
+        "options": {
+          "max-size": "5m",
+          "max-file": "2"
+        }
+      },
+      "extra_hosts": [
+        "nextcloud.direct.ttlouis.space:host-gateway"
+      ]
+    }
+  },
+  "networks": {
+    "jobs": {
+      "internal": true
+    },
+    "worker-ttauth": {
+      "internal": true
+    },
+    "delivery-calls": {
+      "internal": true
+    },
+    "nextcloud": {
+      "external": true,
+      "name": "nextcloud_nextcloud_internal"
+    },
+    "models": {
+      "external": true,
+      "name": "ai-gateway-private"
+    }
+  }
+}

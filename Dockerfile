@@ -4,7 +4,7 @@ WORKDIR /app
 COPY nextcloud_talk_hermes_bridge /app/nextcloud_talk_hermes_bridge
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 USER 1000:1000
-ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.secure_bridge"]
+ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.assistant_bridge"]
 
 FROM ${PYTHON_BASE} AS runner
 WORKDIR /opt/hermes
@@ -17,3 +17,12 @@ COPY nextcloud_talk_hermes_bridge /app/nextcloud_talk_hermes_bridge
 ENV PYTHONPATH=/app:/opt/hermes HERMES_HOME=/state/hermes
 USER 1000:1000
 ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.secure_runner"]
+
+FROM bridge AS connector
+ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.assistant_connector"]
+
+FROM runner AS worker
+ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.assistant_worker"]
+
+FROM bridge AS delivery
+ENTRYPOINT ["python","-m","nextcloud_talk_hermes_bridge.assistant_delivery"]
