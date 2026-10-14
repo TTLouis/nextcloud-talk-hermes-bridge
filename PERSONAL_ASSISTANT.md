@@ -2,8 +2,9 @@
 
 The current application is a general Hermes assistant reached through Nextcloud
 Talk. The image-only v1 deployment is historical; its AI Temporary workflow must
-not be used for new tasks. Initial access remains limited to the selected TTauth
-account. Family onboarding has not been performed.
+not be used for new tasks. Access is explicitly provisioned for TTauth and
+MMFelix. MMFelix's private main conversation has a welcome/reaction card;
+drive consent remains unset until MMFelix makes the real choice.
 
 ## Projects and tasks
 
@@ -182,6 +183,31 @@ welcome/reaction flow. A declined read choice still completes onboarding.
 
 Deployment: `/opt/docker/hermes-talk`; use the server's protected `.env` and
 `compose.yaml`. `compose.personal.yaml` is the four-role source template.
+Two users produce six containers: shared Bridge/Delivery and one Connector/Worker
+pair per user. `deploy/tenant_config.py` validates registered identities and
+distinct dispatch/worker/delivery tokens, then expands the unchanged template
+with a dedicated Worker network, workspace and Connector state for each user.
+`deploy/deploy_personal.py` preserves all existing v2 tenant registrations,
+credentials, delivery bindings, consent and model preferences on upgrade.
+
+Explicit operator provisioning uses `deploy/add_tenant.py --uid STABLE_UID
+--slug SAFE_SLUG --display-name EXACT_DISPLAY_NAME`. It verifies the native
+identity, creates a revocable application token without changing the account's
+password or SSO, creates/reconciles a private main room, invites the helper/bot,
+stores protected per-user configs and regenerates Compose. No drive consent is
+created. `deploy/onboard_tenant.py --slug SAFE_SLUG` sends the deterministic guide
+and reaction card without a synthetic user request. Existing pending welcome
+cards are reused when real requests arrive before the choice.
+
+MMFelix deployment verification used a disposable private conversation: native
+assistant-authored PNG download succeeded for MMFelix; Louis received 404 for
+both MMFelix's file namespace and the same random filename in his own namespace;
+anonymous access received 401. Both main-room cross-account requests returned
+404. Cross-UID/room dispatch, Worker execution and Delivery room/question binding
+failed with 401/403. The test conversation, delivery copy, marker and binding
+were removed. Louis's consent/settings/artifact records were unchanged. No model
+task ran for MMFelix and no read consent was fabricated. MMFelix's actual mobile
+welcome choice and first real model/image task remain to be tested by that user.
 Build Dockerfile.secure targets bridge, connector, worker and delivery, then pin
 immutable local image IDs. `deploy/deploy_personal.py` preserves v1 Compose/.env
 backups, checks for active queue work, runs container contracts before switching,
@@ -194,7 +220,7 @@ room: signed ingress still requires the stable UID and registered project, and
 connectors/delivery recheck the exact owner/helper participant set.
 
 Use `python -m unittest discover -s tests/secure -v` and the no-network disposable
-bridge-image test for 57 contracts. Actual endpoint tests cover native project
+bridge-image test for 62 contracts. Actual endpoint tests cover native project
 creation, rename, emoji/PNG avatar, assistant-authored thread attachment, correct
 owner download and negative permissions. A real task exercises MCP download,
 terminal calculation, text artifact delivery and process exit. A natural main
@@ -203,10 +229,10 @@ task, produced a budget artifact and reported back. Native MCP question → numb
 reaction → same-session resume passed; a separate task retained its budget and
 did not acquire the other task's test memory. The user confirmed real mobile
 image opening and a reaction choice with the correct confirmation reply.
-Mobile thread navigation, push notifications and family deployment require
-separate verification; don't infer them from backend tests.
+Mobile thread navigation, push notifications and MMFelix's first real user
+onboarding require separate verification; don't infer them from backend tests.
 
 Do not blindly restart v1: it rejects the newly added helper participant and does
 not understand the new thread/consent workflow. Preserve new queue/connector
-state and account credentials for a deliberate rollback. Stop the four services
+state and account credentials for a deliberate rollback. Stop the Compose services
 to disable this assistant; existing Nextcloud Assistant/Context Agent are separate.

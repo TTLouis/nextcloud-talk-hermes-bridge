@@ -130,4 +130,18 @@ class ModelTests(unittest.TestCase):
         self.assertEqual((row['reply'],row['thread']),(0,0))
         self.assertEqual(json.loads(row['choice'])['options']['1️⃣']['kind'],'model_scope')
 
+    def test_proactive_welcome_prevents_duplicate_consent_cards_and_keeps_request(self):
+        b=self.bridge()
+        welcome={'id':'f'*12,'uid':'alice','room':'main123','thread':0,'reply_room':None,'reply_thread':None}
+        b.queue_choice(welcome,0,'Welcome',{'✅':{'kind':'consent','decision':'allow'},'❌':{'kind':'consent','decision':'deny'}},'consent')
+        self.assertTrue(b.has_pending_consent('alice'));self.assertFalse(b.has_pending_consent('bob'))
+        ident,_=b.enqueue(('alice','main123',1,'real first request',0))
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',return_value=(200,{'requires_consent':True,'message':'Welcome'})):
+            b.run_one()
+        with b.db() as db:
+            self.assertEqual(db.execute('SELECT status FROM jobs WHERE id=?',(ident,)).fetchone()[0],'awaiting_onboarding')
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM notifications WHERE choice IS NOT NULL').fetchone()[0],1)
+        self.assertEqual(b.release_onboarding('alice'),1)
+        self.assertFalse(b.has_pending_consent('alice'))
+
 if __name__=='__main__':unittest.main()

@@ -1,6 +1,6 @@
 # Maintained personal assistant deployment
 
-Use [PERSONAL_ASSISTANT.md](PERSONAL_ASSISTANT.md) for the current four-container
+Use [PERSONAL_ASSISTANT.md](PERSONAL_ASSISTANT.md) for the current four-role
 general assistant, autonomous project handoff, private Docker scratchpads,
 owner-consented MCP reads, assistant-authored attachments and reaction choices.
 
@@ -20,8 +20,18 @@ Check status with:
 docker compose --env-file /opt/docker/hermes-talk/.env -f /opt/docker/hermes-talk/compose.yaml ps
 ```
 
-Stop those four services to disable the assistant while preserving its state.
+Stop the Compose services to disable the assistant while preserving its state.
 Do not use `down -v`. Before an upgrade, verify the global queue is idle; the
 deployment helper checks both before building and immediately before switching.
-Family onboarding is a separate deployment with a per-user connector, worker,
-volume and credential; it has not been enabled.
+TTauth and MMFelix are explicitly provisioned. Each has its own Connector,
+Worker, private Worker network, workspace, credential, consent and model state.
+The Bridge/Delivery are shared, producing six containers with one global task
+queue. `deploy/tenant_config.py` generates Compose from validated protected
+registrations; upgrades retain every tenant instead of rebuilding a singleton.
+MMFelix's welcome card awaits its owner's real allow/decline choice.
+
+To provision an explicitly authorized new user, run server-local
+`deploy/add_tenant.py --uid STABLE_UID --slug SAFE_SLUG --display-name EXACT_NAME`,
+then repeat native ACL/dispatch negative checks and run
+`deploy/onboard_tenant.py --slug SAFE_SLUG`. Never manufacture read consent or
+collect account passwords in Talk. Unknown accounts cannot self-enroll.

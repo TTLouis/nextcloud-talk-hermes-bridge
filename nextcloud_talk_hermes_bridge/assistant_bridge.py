@@ -162,6 +162,14 @@ class Bridge(BaseBridge):
                 if choice['uid']==job['uid'] and choice['group']==group:db.execute("UPDATE notifications SET status='cancelled' WHERE id=?",(row['id'],))
         self.queue_choice(job,sequence,card['text'],card['options'],group)
 
+    def has_pending_consent(self,uid):
+        with self.db() as db:
+            if db.execute("SELECT 1 FROM choices WHERE uid=? AND choice_group='consent' AND status='pending'",(uid,)).fetchone():return True
+            for row in db.execute("SELECT choice FROM notifications WHERE status='pending' AND choice IS NOT NULL"):
+                choice=json.loads(row['choice'])
+                if choice['uid']==uid and choice['group']=='consent':return True
+        return False
+
     def react(self,room,message_id,emoji):
         nonce=os.urandom(32).hex();signature=hmac.new(self.config['bot_secret'].encode(),(nonce+emoji).encode(),hashlib.sha256).hexdigest()
         request(self.config['nextcloud_url']+'/ocs/v2.php/apps/spreed/api/v1/bot/'+room+'/reaction/'+str(message_id),method='POST',
@@ -241,8 +249,7 @@ class Bridge(BaseBridge):
                     self.queue_model_card(job,sequence,result['model_card']);sequence+=1
                 if result.get('requires_consent'):
                     awaiting_onboarding=True
-                    with self.db() as db:waiting=db.execute("SELECT id FROM jobs WHERE uid=? AND status='awaiting_onboarding' LIMIT 1",(job['uid'],)).fetchone()
-                    if not waiting:self.queue_choice(job,-1,text,{'✅':{'kind':'consent','decision':'allow'},'❌':{'kind':'consent','decision':'deny'}},'consent')
+                    if not self.has_pending_consent(job['uid']):self.queue_choice(job,-1,text,{'✅':{'kind':'consent','decision':'allow'},'❌':{'kind':'consent','decision':'deny'}},'consent')
                     else:self.queue_message(job,-1,'你的请求已保留。请先在首次欢迎消息下面点 ✅ 或 ❌，我会按顺序继续处理。',job['message_id'])
                     sequence+=1
                 elif text:
