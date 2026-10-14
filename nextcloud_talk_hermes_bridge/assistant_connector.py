@@ -21,6 +21,7 @@ from .secure_common import request,json_request
 from .assistant_cloud import Cloud
 from .assistant_context import context_key,task_workspace,read_workspace,write_workspace,relative_path
 from .assistant_onboarding import FIRST_USE
+from .assistant_titles import conversation_title
 
 class Connector:
     def __init__(self,config,state,workspace):
@@ -38,7 +39,7 @@ class Connector:
             db.execute('CREATE TABLE IF NOT EXISTS handoffs (id TEXT PRIMARY KEY,source_room TEXT,source_thread INTEGER,target_room TEXT,target_thread INTEGER,prompt TEXT,title TEXT)')
             db.execute('CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY,room TEXT,thread INTEGER,question TEXT,options TEXT,status TEXT,answer TEXT)')
             for r in config['rooms']:
-                db.execute('INSERT OR IGNORE INTO projects VALUES (?,?)',(r,config.get('project_name','个人助理')))
+                db.execute('INSERT OR IGNORE INTO projects VALUES (?,?)',(r,conversation_title(config.get('project_name','Hermes'),main=r==config['room'])))
 
     @contextmanager
     def db(self):
@@ -304,12 +305,11 @@ class Connector:
     def project_change(self,data,p):
         kind=data['kind'];room=p['room']
         if kind in ('create','rename'):
-            title=data.get('name','').strip()
-            if not 0<len(title)<=100:raise ValueError('Invalid project name')
+            title=conversation_title(data.get('name',''),main=kind=='rename' and room==self.config['room'])
         if kind=='rename':
             self.nc.ocs('apps/spreed/api/v4/room/'+room,{'roomName':title},'PUT')
             with self.db() as db:db.execute('UPDATE projects SET name=? WHERE room=?',(title,room))
-            return {'message':'项目已改名为「'+title+'」。任务上下文保持独立。'}
+            return {'message':'对话已改名为「'+title+'」。现有上下文保持不变。'}
         if kind=='emoji':
             emoji=data.get('emoji','')
             if not 0<len(emoji)<=16:raise ValueError('Invalid emoji')
@@ -324,7 +324,7 @@ class Connector:
             with self.db() as db:db.execute('INSERT INTO projects VALUES (?,?)',(token,title))
             _,_=json_request(self.config['delivery_url']+'/bind',method='POST',headers={'Authorization':'Bearer '+self.config['delivery_token']},
                 body={'room':token},timeout=30)
-            return {'message':'项目「'+title+'」已建立。进入新对话，发送「新任务 标题」开始。','new_project':token}
+            return {'message':'独立对话「'+title+'」已建立。可以直接说需求，主助理也可把任务交接到这里。','new_project':token}
         raise ValueError('Invalid project operation')
 
 class Handler(BaseHandler):

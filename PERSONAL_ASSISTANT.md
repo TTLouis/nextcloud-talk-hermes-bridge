@@ -7,7 +7,10 @@ account. Family onboarding has not been performed.
 
 ## Projects and tasks
 
-`Hermes AI` is the primary assistant. Users state their needs naturally here;
+`主助理 · Hermes` is the primary assistant. Dedicated conversations use
+`项目 · <subject>` (or an explicitly named `主题 · <subject>`). Native create
+and rename calls enforce the role prefix, so a project cannot be titled as the
+primary assistant. Users state their needs naturally here;
 project/task commands are optional navigation shortcuts. For work deserving
 separate follow-up, the assistant selects a relevant registered project or
 creates a private conversation, starts a named task thread, and hands off a
@@ -158,7 +161,7 @@ room: signed ingress still requires the stable UID and registered project, and
 connectors/delivery recheck the exact owner/helper participant set.
 
 Use `python -m unittest discover -s tests/secure -v` and the no-network disposable
-bridge-image test for 44 contracts. Actual endpoint tests cover native project
+bridge-image test for 46 contracts. Actual endpoint tests cover native project
 creation, rename, emoji/PNG avatar, assistant-authored thread attachment, correct
 owner download and negative permissions. A real task exercises MCP download,
 terminal calculation, text artifact delivery and process exit. A natural main

@@ -8,6 +8,7 @@ from unittest import mock
 from nextcloud_talk_hermes_bridge.assistant_context import context_key,relative_path,read_workspace,write_workspace,task_workspace
 from nextcloud_talk_hermes_bridge.assistant_connector import Connector
 from nextcloud_talk_hermes_bridge.assistant_bridge import Bridge,Denied
+from nextcloud_talk_hermes_bridge.assistant_titles import conversation_title
 
 class AssistantTests(unittest.TestCase):
     def setUp(self):
@@ -273,5 +274,25 @@ class AssistantTests(unittest.TestCase):
             self.c.execute({**self.p,'kind':'consent','decision':'deny'})
         restarted=Connector(self.config,self.root/'control',self.root/'workspace')
         self.assertIs(restarted.consent(),False)
+
+    def test_conversation_titles_keep_main_and_projects_distinct(self):
+        self.assertEqual(conversation_title('Hermes AI',main=True),'主助理 · Hermes')
+        self.assertEqual(conversation_title('旅行计划'),'项目 · 旅行计划')
+        self.assertEqual(conversation_title('主助理 · 旅行计划'),'项目 · 旅行计划')
+        self.assertEqual(conversation_title('项目 · 项目 · 旅行计划'),'项目 · 旅行计划')
+        self.assertEqual(conversation_title('主题 · 摄影'),'主题 · 摄影')
+        self.assertEqual(conversation_title('主题 · 摄影',main=True),'主助理 · 摄影')
+        for value in ['',None,'项目 · ','a'*100,'abc\nxyz']:
+            with self.assertRaises(ValueError):conversation_title(value)
+
+    def test_native_create_and_rename_apply_role_before_api_call(self):
+        self.c.config['bot_id']=1
+        with mock.patch.object(self.c.nc,'ocs',return_value={'token':'newroom'} ) as api, mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.json_request',return_value=(200,{'bound':True})):
+            self.c.project_change({'kind':'create','name':'旅行计划'},self.p)
+            self.assertEqual(api.call_args_list[0].args[1]['roomName'],'项目 · 旅行计划')
+            self.c.project_change({'kind':'rename','name':'旅行计划'},self.p)
+            self.assertEqual(api.call_args.args[1]['roomName'],'主助理 · 旅行计划')
+            self.c.project_change({'kind':'rename','name':'旅行计划'},{**self.p,'room':'newroom'})
+            self.assertEqual(api.call_args.args[1]['roomName'],'项目 · 旅行计划')
 
 if __name__=='__main__':unittest.main()
