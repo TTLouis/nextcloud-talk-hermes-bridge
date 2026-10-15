@@ -10,6 +10,7 @@ import time
 from .secure_bridge import Server
 from .secure_runner import Handler as BaseHandler
 from .assistant_context import context_key, task_workspace
+from .assistant_replies import worker_reply, DETAILS_MARKER
 
 class Worker:
     def __init__(self,config,state):
@@ -63,6 +64,11 @@ class Worker:
             '本地文件与命令工具运行在你的 Docker 工作容器内；没有宿主机或其他用户权限。'
             '完成成果后调用 present_file 返回附件，宿主会询问是否保存；你不能自行确认或声称已保存。'
             '对话图标要求正方形 PNG；生图返回非方形时，用工作区里的 Pillow 裁剪副本后再提出图标修改。'
+            '回复供手机阅读：用自然的短段落，必要时用 bullet points 或编号，避免重复、长篇铺垫和不必要的标题；不是只给一句结论。'
+            '重要的结果、金额、期限、风险、限制和待用户决定的事项要在正文中说清楚，不因追求简短而省略。'
+            '一般回复控制在约 200–400 字；问题简单时更短，用户明确要求完整内容时保留全部细节。'
+            '需要较长说明时，先给不超过 600 字的可独立理解的手机版（可用 bullet points），再写 '+DETAILS_MARKER+'，后面保留完整说明；宿主将提供 📄 完整原文附件。'
+            '成果用描述内容的文件名，支持中文；present_file 的 name 可指定可读名称，不把工作区中的随机 ID 当作文件名。'
             '普通咨询直接回复。需要用户选择时清楚询问，不要虚构执行成功。\n当前用户消息：\n'+p['prompt'])
         env={'PATH':str(Path(python).parent)+':/usr/local/bin:/usr/bin:/bin','HOME':str(home),'HERMES_HOME':str(home),
              'PYTHONPATH':'/app:/opt/hermes','PYTHONDONTWRITEBYTECODE':'1','PYTHONUNBUFFERED':'1',
@@ -119,7 +125,7 @@ class Worker:
             session.write_text(json.dumps({'session_id':final['session_id'],'context':key}))
         if not final or proc.returncode or final.get('exit_code'):
             raise RuntimeError('Hermes task failed; private diagnostics retained')
-        return {'message':str(final.get('text','')).strip()[:12000],'context':key,'model':model}
+        return {**worker_reply(self.state,work,p['job_id'],str(final.get('text',''))),'context':key,'model':model}
 
 class Handler(BaseHandler):
     pass

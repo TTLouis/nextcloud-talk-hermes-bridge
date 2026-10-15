@@ -63,6 +63,16 @@ They do not show another user's tasks or queue details.
 The current welcome messages and control commands are in Chinese. You can write
 ordinary requests in the language supported by your chosen model.
 
+## Reading replies on a phone
+
+Replies use short paragraphs and useful bullet points, with key results, amounts,
+deadlines, risks and decisions in the chat. Longer explanations offer a **📄**
+reaction to open the complete original as a Markdown attachment. Opening it does
+not make another model call. Saving it to your own files still requires a
+separate **✅** confirmation. If the assistant produces an unstructured long
+reply, the chat labels its preview as an excerpt rather than claiming it is a
+complete summary. The original text is retained in the private assistant state.
+
 ## Projects and tasks
 
 Start in the main assistant; you do not need to create a project manually.
@@ -89,7 +99,8 @@ The assistant sends finished files as native Talk attachments under the separate
 card:
 
 - **✅ Save:** create your own copy at the destination shown on the card, under
-  `AI Outputs/<project>/`.
+  `AI Outputs/<project name>/<task name>/` (or `AI Outputs/个人助理/`
+  for the main assistant).
 - **❌ Do not save:** leave the delivered attachment available without creating
   a formal copy in your output folder.
 
@@ -97,6 +108,17 @@ Talk may show a delivered attachment in its shared-file area. Drafts, scratch
 files and intermediate results stay in the assistant's Docker workspace.
 Choosing not to save does not delete the delivered attachment or private
 snapshot; automatic expiry is not currently implemented.
+
+New outputs keep descriptive Unicode filenames, including Chinese. Duplicate
+names receive a number such as `预算 (2).txt`. The save card shows the exact
+destination; an existing cloud file is never overwritten. If a collision is
+found when saving, a new destination needs a fresh confirmation. Existing files
+and previously displayed destinations are preserved. Folder names are fixed
+when first used, so renaming a conversation does not move saved files.
+
+Image generation is supported. Reading the visual content of an incoming Talk
+photo is not currently connected to the assistant; downloading a cloud image
+does not by itself enable visual analysis.
 
 ## Model selection
 

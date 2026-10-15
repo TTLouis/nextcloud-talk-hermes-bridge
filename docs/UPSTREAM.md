@@ -44,7 +44,7 @@ instructions for this fork.
   the recipient's own output directory.
 - Personal model defaults, context-bound next-task overrides and immutable model
   choices through handoffs and question continuations.
-- Docker runtime hardening and 62 contracts covering these boundaries and flows.
+- Docker runtime hardening and active Linux contracts covering these boundaries and flows.
 - Multi-user provisioning and upgrades that preserve existing registrations,
   credentials, consent and model settings.
 
@@ -75,3 +75,16 @@ AppAPI lifecycle writes, upstream room-only approvals, identity fallbacks or the
 limit initiative to relevant current requests and existing authorization.
 Active Linux contracts now total 76, including feedback routing, replay, failure,
 unsigned ingress, in-flight completion ordering and cross-user isolation.
+
+## Mobile presentation follow-up
+
+The fork also adds mobile prose/bullets with on-demand complete original reply
+attachments, Unicode output names and stable human-readable project/task save
+paths. Viewing details does not run a model or grant cloud access; saving remains
+a separate owner-bound choice. Legacy destinations and Docker authority remain
+unchanged. These changes are local adaptations, not an upstream runtime merge.
+
+The mobile follow-up has 93 active Linux contracts. Native Talk 23 verification
+also exposed the thread API's `title` field; context labels, task navigation and
+new save-folder names now read that field, retaining a `name` fallback. Existing
+folder mappings and pending destinations are not renamed.

@@ -263,8 +263,14 @@ class Bridge(TaskFeedback,BaseBridge):
                     else:self.queue_message(job,-1,'你的请求已保留。请先在首次欢迎消息下面点 ✅ 或 ❌，我会按顺序继续处理。',job['message_id'])
                     sequence+=1
                 elif text:
-                    for start in range(0,len(text),3000):
-                        self.queue_message(job,sequence,text[start:start+3000],job['message_id']);sequence+=1
+                    if result.get('details'):
+                        detail=result['details'];options={'📄':{'kind':'details','artifact':detail['artifact']}}
+                        self.queue_choice(job,sequence,text+'\n\n📄 查看完整说明（附件；保存需另行确认）',options,'details:'+detail['artifact']);sequence+=1
+                        if job['parent_room']:
+                            self.queue_choice(job,sequence,text+'\n\n📄 查看完整说明\n项目：'+self.config['nextcloud_url']+'/call/'+job['room'],options,'details:'+detail['artifact'],room=job['parent_room'],thread=job['parent_thread'] or 0);sequence+=1
+                    else:
+                        for start in range(0,len(text),3000):
+                            self.queue_message(job,sequence,text[start:start+3000],job['message_id']);sequence+=1
                 for artifact in result.get('artifacts',[]):
                     text='成果「'+artifact['name']+'」已返回。要保存到「'+artifact.get('save_path','你的正式目录')+'」吗？\n✅ 保存　❌ 不保存'
                     options={'✅':{'kind':'save','artifact':artifact['artifact']},'❌':{'kind':'discard','artifact':artifact['artifact']}}
@@ -284,7 +290,7 @@ class Bridge(TaskFeedback,BaseBridge):
                     for index,handoff in enumerate(result['handoffs']):
                         self.enqueue_handoff(job,handoff)
                         self.queue_message(job,500+index,'已交接任务「'+handoff['title']+'」。相关背景和下一步已交给独立项目，接下来会自动执行并回报这里。\n'+self.config['nextcloud_url']+'/call/'+handoff['target_room'],job['message_id'])
-                if job['parent_room']:
+                if job['parent_room'] and not result.get('details'):
                     self.queue_message(job,1000,'项目任务有更新：\n'+(result.get('message') or '已返回成果，请到项目线程查看。')[:1500]+'\n项目：'+self.config['nextcloud_url']+'/call/'+job['room'],
                         thread=job['parent_thread'] or 0,room=job['parent_room'])
             self.finish_job(job['id'],'awaiting_onboarding' if awaiting_onboarding else 'done')

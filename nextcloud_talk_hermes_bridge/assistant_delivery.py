@@ -10,6 +10,7 @@ from .secure_bridge import Server
 from .secure_runner import Handler as BaseHandler
 from .assistant_cloud import Cloud
 from .assistant_context import context_key
+from .assistant_outputs import valid_filename
 
 class Delivery:
     def __init__(self,config,state):
@@ -69,7 +70,7 @@ class Delivery:
         artifact=p.get('artifact','')
         if not re.fullmatch('[a-f0-9]{12}',artifact):raise ValueError('Invalid artifact')
         name=p.get('name','')
-        if not re.fullmatch('[a-zA-Z0-9_.-]{1,100}',name) or name.startswith('.'):raise ValueError('Invalid filename')
+        if not valid_filename(name):raise ValueError('Invalid filename')
         data=base64.b64decode(p.get('data',''),validate=True)
         if not 0<len(data)<=20*1024*1024:raise ValueError('Unsupported size')
         self.cloud.room(p['room'],tenant['uid'],self.config['assistant_uid'])

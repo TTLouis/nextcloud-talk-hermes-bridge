@@ -66,6 +66,35 @@ existing handoff tools, and report useful next steps. The current request takes
 priority; unrelated previous work is not silently restarted. No `/new` reset,
 background monitoring, scheduled inference or broader API grants are added.
 
+## Mobile replies and readable output paths
+
+The agent is instructed to use short natural paragraphs and useful bullet points,
+including material amounts, deadlines, risks and choices in the mobile text. For
+a long explanation it can separate a complete mobile summary from the full
+explanation with `<!-- assistant-details -->`. A deterministic fallback labels
+an excerpt when no bounded summary is available. This is presentation only, not
+a permission boundary. The full untrimmed model result is retained verbatim; the
+former 12,000-character final-result truncation is removed.
+
+The Worker writes a job-bound UTF-8 Markdown snapshot through descriptor-relative
+IO. The Connector reads only that exact task path, verifies the digest and keeps
+a protected snapshot bound to the owner/room/thread. A 📄 reaction delivers it
+as an assistant-owned native attachment without a new agent run or consuming
+a model override. Before that click it remains in Docker. Formal cloud saving
+requires the separate existing ✅/❌ card. Main-conversation mirrored detail
+cards resolve to the same original project/task operation and cannot cross users.
+
+New outputs have sanitized Unicode names and frozen human-readable folder
+mappings: `AI Outputs/个人助理/` or `AI Outputs/<project>/<task>/`. Internal context
+and ownership keys remain opaque. Same-name folders/files receive numeric
+suffixes. Existing artifacts retain their original displayed destination. Native
+conditional uploads prevent overwrites; a 412 collision produces a new path and
+a fresh confirmation rather than silently saving elsewhere. Old reservations
+remain reserved. Project renames do not move saved files or pending destinations.
+
+The existing vision capability remains disabled. Talk attachment ingestion into
+a vision model is not part of this release.
+
 ## Text model choices
 
 The initial per-user default is `gpt-6.1-sol`. The approved menu also offers

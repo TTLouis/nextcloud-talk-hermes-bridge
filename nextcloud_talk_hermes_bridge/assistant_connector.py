@@ -23,8 +23,10 @@ from .assistant_context import context_key,task_workspace,read_workspace,write_w
 from .assistant_onboarding import FIRST_USE
 from .assistant_titles import conversation_title
 from .assistant_models import ModelSettings
+from .assistant_outputs import ReadableOutputs,readable_filename
+from .assistant_replies import ReplyDetails
 
-class Connector(ModelSettings):
+class Connector(ReplyDetails,ReadableOutputs,ModelSettings):
     def __init__(self,config,state,workspace):
         self.config=config;self.state=Path(state);self.workspace=Path(workspace)
         self.state.mkdir(parents=True,exist_ok=True);self.workspace.mkdir(parents=True,exist_ok=True)
@@ -42,6 +44,8 @@ class Connector(ModelSettings):
             for r in config['rooms']:
                 db.execute('INSERT OR IGNORE INTO projects VALUES (?,?)',(r,conversation_title(config.get('project_name','Hermes'),main=r==config['room'])))
         self.init_models()
+        self.init_outputs()
+        self.init_replies()
 
     @contextmanager
     def db(self):
@@ -62,7 +66,7 @@ class Connector(ModelSettings):
 
     def tasks(self,room):
         data=self.nc.ocs('apps/spreed/api/v1/chat/'+room+'/threads/recent')
-        return [{'id':r['thread']['id'],'name':r['thread'].get('name','')} for r in data]
+        return [{'id':r['thread']['id'],'name':r['thread'].get('title') or r['thread'].get('name','')} for r in data]
 
     def consent(self):
         with self.db() as db:
@@ -98,6 +102,7 @@ class Connector(ModelSettings):
                 with self.db() as db:db.execute('INSERT OR REPLACE INTO consent VALUES (?,?,?)',(self.config['uid'],int(allowed),time.time()))
                 return {'onboarding_complete':True,'message':'已允许通过 MCP 按任务读取你本人可访问的网盘文件。可随时发送「撤销网盘授权」关闭。' if allowed else '已关闭网盘读取。仍可对话、使用私有工作区和生图。'}
             if kind in ('save','discard'):return self.decide(p)
+            if kind=='details':return self.view_details(p)
             if kind=='confirm':return self.confirm(p)
             if kind=='cancel':
                 with self.db() as db:
@@ -111,7 +116,7 @@ class Connector(ModelSettings):
             # Native room-scoped thread lookup validates that the task actually belongs to this project.
             thread_info=self.nc.ocs('apps/spreed/api/v1/chat/'+p['room']+'/threads/'+str(p['thread'])) if p['thread'] else {}
             p={**p,'project_name':room_info.get('displayName','') if isinstance(room_info,dict) else '',
-               'task_name':thread_info.get('thread',{}).get('name','') if p['thread'] else '主助理' if p['room']==self.config['room'] else '项目协调',
+               'task_name':(thread_info.get('thread',{}).get('title') or thread_info.get('thread',{}).get('name','')) if p['thread'] else '主助理' if p['room']==self.config['room'] else '项目协调',
                'coordination':p['thread']==0}
             model=self.assign_task_model(p,question_origin,is_answer)
             p={**p,'chat_model':model['model'],'task_root':model['root_job']}
@@ -122,6 +127,7 @@ class Connector(ModelSettings):
             try:
                 _,result=json_request(self.config['worker_url']+'/execute',method='POST',timeout=640,limit=65536,
                     headers={'Authorization':'Bearer '+self.config['worker_token']},body={**p,'grant':token})
+                self.retain_reply(p,work,result)
                 result['model']=model['model'];result['model_source']=model['source']
                 with self.grant_lock:
                     result['artifacts']=list(self.active['artifacts']);result['proposals']=list(self.active['proposals']);result['handoffs']=list(self.active['handoffs']);result['questions']=list(self.active['questions'])
@@ -133,6 +139,9 @@ class Connector(ModelSettings):
             finally:
                 with self.grant_lock:self.active=None
         finally:self.lock.release()
+
+    def delivery_request(self,*args,**kwargs):
+        return json_request(*args,**kwargs)
 
     def active_grant(self,bearer,count=False,model=False):
         with self.grant_lock:
@@ -203,25 +212,10 @@ class Connector(ModelSettings):
             path=args['path'];data=read_workspace(self.workspace,self.work_relative(a,path))
             if not data:raise ValueError('Empty output')
             artifact=hashlib.sha256((p['job_id']+'\0'+path).encode()).hexdigest()[:12]
-            filename=re.sub('[^a-zA-Z0-9_.-]','_',Path(path).name)[:90].lstrip('.') or 'output.bin'
-            with self.db() as db:r=db.execute('SELECT * FROM artifacts WHERE id=?',(artifact,)).fetchone()
-            if not r:
-                snapshot=self.state/'artifacts'/artifact
-                with snapshot.open('xb') as h:h.write(data)
-                with self.db() as db:db.execute('INSERT INTO artifacts VALUES (?,?,?,?,?,?,?,?)',
-                    (artifact,p['room'],p['thread'],filename,'prepared',hashlib.sha256(data).hexdigest(),None,None))
-            elif r['room']!=p['room'] or r['thread']!=p['thread']:raise PermissionError('Wrong output context')
-            if r and r['status'] in ('pending','saved'):
-                result={'artifact':artifact,'name':r['name']}
-            else:
-                snapshot=(self.state/'artifacts'/artifact).read_bytes()
-                _,receipt=json_request(self.config['delivery_url']+'/deliver',method='POST',timeout=90,limit=65536,
-                    headers={'Authorization':'Bearer '+self.config['delivery_token']},
-                    body={'room':p['room'],'thread':p['thread'],'artifact':artifact,'name':filename,'data':base64.b64encode(snapshot).decode()})
-                with self.db() as db:db.execute("UPDATE artifacts SET status='pending',delivery=? WHERE id=?",(json.dumps(receipt),artifact))
-                result={'artifact':artifact,'name':filename}
+            filename=readable_filename(path,args.get('name'))
+            self.prepare_snapshot(p,artifact,filename,data)
+            result=self.deliver_snapshot(p,artifact)
             with self.grant_lock:
-                result['save_path']='AI Outputs/'+p['room']+'/'+artifact+'-'+filename
                 if result not in self.active['artifacts']:self.active['artifacts'].append(result)
             return {**result,'delivered_as_assistant':True,'saved_to_user_drive':False}
         if name=='propose_project_change':
@@ -300,9 +294,14 @@ class Connector(ModelSettings):
             return {'message':'不保存进你的正式目录。成果保留在助手工作区和原 Talk 附件中。'}
         if r['status']=='saved':return {'message':'此前已保存到 '+r['saved_path']}
         if r['status']!='pending':raise ValueError('Not pending')
-        destination='AI Outputs/'+p['room']+'/'+ident+'-'+r['name']
-        self.nc.mkdirs('AI Outputs/'+p['room'])
-        self.nc.upload_file(destination,(self.state/'artifacts'/ident).read_bytes())
+        destination=self.artifact_destination(r)
+        self.nc.mkdirs(destination.rsplit('/',1)[0])
+        try:self.nc.upload_file(destination,(self.state/'artifacts'/ident).read_bytes())
+        except urllib.error.HTTPError as exc:
+            if exc.code!=412:raise
+            destination=self.reserve_output_path(p,ident,r['name'],replace=True)
+            return {'message':'目标位置已有同名文件，未覆盖。请确认新的保存位置。',
+                    'artifacts':[{'artifact':ident,'name':r['name'],'save_path':destination}]}
         with self.db() as db:db.execute("UPDATE artifacts SET status='saved',saved_path=? WHERE id=?",(destination,ident))
         return {'message':'已保存到你本人网盘的 '+destination}
 

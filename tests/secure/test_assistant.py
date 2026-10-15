@@ -83,7 +83,7 @@ class AssistantTests(unittest.TestCase):
     def test_present_file_uses_assistant_delivery_and_never_user_upload(self):
         work=task_workspace(self.c.workspace,'alice','room123',12)
         write_workspace(self.c.workspace,str(work.relative_to(self.c.workspace))+'/scratch/out.txt',b'answer')
-        active={'payload':self.p,'work':work,'artifacts':[]};self.c.active=active
+        active={'payload':{**self.p,'task_name':'测试任务'},'work':work,'artifacts':[]};self.c.active=active
         with mock.patch.object(self.c.nc,'room'),mock.patch.object(self.c.nc,'upload_file') as upload, \
             mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.json_request',return_value=(200,{'share_id':1})) as deliver:
             result=self.c.tool(active,'present_file',{'path':'out.txt'})
