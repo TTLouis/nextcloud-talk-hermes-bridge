@@ -43,6 +43,17 @@ class Cloud(Nextcloud):
         request(self.dav_url(path),method='PUT',body=binary,limit=8192,
             headers={**self.headers,'Content-Type':mimetypes.guess_type(path)[0] or 'application/octet-stream','If-None-Match':'*'})
 
+    def download_message_image(self,path,file_id,etag,limit):
+        path=self.path(path)
+        body=b'<d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><d:prop><oc:fileid/><d:getetag/><d:resourcetype/></d:prop></d:propfind>'
+        _,raw=request(self.dav_url(path),method='PROPFIND',body=body,headers={**self.headers,'Depth':'0','Content-Type':'application/xml'},limit=65536)
+        root=ET.fromstring(raw);prop=root.find('{DAV:}response/{DAV:}propstat/{DAV:}prop')
+        if prop is None or prop.findtext('{http://owncloud.org/ns}fileid')!=str(file_id):raise PermissionError('Native image file identity changed')
+        current=prop.findtext('{DAV:}getetag','')
+        if not current or not etag or current.strip('"')!=str(etag).strip('"'):raise PermissionError('Native image changed after it was sent')
+        if prop.find('{DAV:}resourcetype/{DAV:}collection') is not None:raise ValueError('Not an image file')
+        return request(self.dav_url(path),headers={**self.headers,'If-Match':current},limit=limit)[1]
+
     def room(self,room,owner,assistant):
         info=self.ocs('apps/spreed/api/v4/room/'+urllib.parse.quote(room,safe=''))
         if int(info['type'])!=2 or int(info.get('listable',0))!=0:raise PermissionError('Not a private project room')

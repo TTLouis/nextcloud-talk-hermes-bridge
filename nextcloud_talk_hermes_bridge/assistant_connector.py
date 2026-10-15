@@ -25,8 +25,10 @@ from .assistant_titles import conversation_title
 from .assistant_models import ModelSettings
 from .assistant_outputs import ReadableOutputs,readable_filename
 from .assistant_replies import ReplyDetails
+from .assistant_vision import TalkImages
+from .assistant_coordination import Coordination
 
-class Connector(ReplyDetails,ReadableOutputs,ModelSettings):
+class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettings):
     def __init__(self,config,state,workspace):
         self.config=config;self.state=Path(state);self.workspace=Path(workspace)
         self.state.mkdir(parents=True,exist_ok=True);self.workspace.mkdir(parents=True,exist_ok=True)
@@ -46,6 +48,7 @@ class Connector(ReplyDetails,ReadableOutputs,ModelSettings):
         self.init_models()
         self.init_outputs()
         self.init_replies()
+        self.init_coordination()
 
     @contextmanager
     def db(self):
@@ -75,6 +78,12 @@ class Connector(ReplyDetails,ReadableOutputs,ModelSettings):
 
     def execute(self,p):
         room_info=self.authorize(p)
+        native=p.get('native_input') is True
+        if native:p={**p,'thread':self.resolve_native_thread(p)}
+        result=self.execute_authorized(p,room_info)
+        return {**result,'execution_thread':p['thread']} if native else result
+
+    def execute_authorized(self,p,room_info):
         if not self.lock.acquire(False):raise BlockingIOError('Connector busy')
         try:
             kind=p['kind']
@@ -118,6 +127,9 @@ class Connector(ReplyDetails,ReadableOutputs,ModelSettings):
             p={**p,'project_name':room_info.get('displayName','') if isinstance(room_info,dict) else '',
                'task_name':(thread_info.get('thread',{}).get('title') or thread_info.get('thread',{}).get('name','')) if p['thread'] else '主助理' if p['room']==self.config['room'] else '项目协调',
                'coordination':p['thread']==0}
+            work=task_workspace(self.workspace,self.config['uid'],p['room'],p['thread'])
+            image=self.prepare_talk_image(p,work)
+            p={**p,'input_image':image,'project_updates':self.coordination_brief(p)}
             model=self.assign_task_model(p,question_origin,is_answer)
             p={**p,'chat_model':model['model'],'task_root':model['root_job']}
             work=task_workspace(self.workspace,self.config['uid'],p['room'],p['thread'])
@@ -131,7 +143,8 @@ class Connector(ReplyDetails,ReadableOutputs,ModelSettings):
                 result['model']=model['model'];result['model_source']=model['source']
                 with self.grant_lock:
                     result['artifacts']=list(self.active['artifacts']);result['proposals']=list(self.active['proposals']);result['handoffs']=list(self.active['handoffs']);result['questions']=list(self.active['questions'])
-                with self.db() as db:db.execute('INSERT OR REPLACE INTO task_state VALUES (?,?,?,?,?)',(p['room'],p['thread'],'done',result.get('message','')[:2000],time.time()))
+                status='incomplete' if result.get('outcome')=='incomplete' else 'awaiting_choice' if result.get('questions') else 'done'
+                with self.db() as db:db.execute('INSERT OR REPLACE INTO task_state VALUES (?,?,?,?,?)',(p['room'],p['thread'],status,result.get('message','')[:2000],time.time()))
                 return result
             except Exception as exc:
                 with self.db() as db:db.execute('INSERT OR REPLACE INTO task_state VALUES (?,?,?,?,?)',(p['room'],p['thread'],'failed',type(exc).__name__,time.time()))
@@ -378,7 +391,8 @@ class Handler(BaseHandler):
         try:
             a=self.server.runner.active_grant(self.headers.get('Authorization',''),self.path=='/tools',self.path.startswith('/v1/'))
             length=int(self.headers.get('Content-Length','0'))
-            if self.headers.get('Transfer-Encoding') or not 0<length<=4*1024*1024:self.reply(413,{});return
+            limit=4*1024*1024 if self.path=='/tools' else 16*1024*1024
+            if self.headers.get('Transfer-Encoding') or not 0<length<=limit:self.reply(413,{});return
             raw=self.rfile.read(length)
             if len(raw)!=length:raise ValueError('Truncated request')
             data=json.loads(raw)
@@ -386,8 +400,15 @@ class Handler(BaseHandler):
                 self.reply(200,self.server.runner.tool(a,data['name'],data.get('arguments',{})));return
             # Fixed destination/routes/models; no arbitrary HTTP proxy and no provider key in worker.
             self.server.runner.check_task_model(a,data)
-            _,response=request(self.server.runner.config['model_url']+self.path[3:],method='POST',body=raw,timeout=240,limit=32*1024*1024,
-                headers={'Content-Type':'application/json','Authorization':'Bearer '+self.server.runner.config['model_token']})
+            raw,seq=self.server.runner.model_envelope(a,data,self.path)
+            try:
+                status,response=request(self.server.runner.config['model_url']+self.path[3:],method='POST',body=raw,timeout=240,limit=32*1024*1024,
+                    headers={'Content-Type':'application/json','Authorization':'Bearer '+self.server.runner.config['model_token']})
+                self.server.runner.finish_model_audit(a['payload']['job_id'],seq,status)
+            except urllib.error.HTTPError as exc:
+                self.server.runner.finish_model_audit(a['payload']['job_id'],seq,exc.code);raise
+            except Exception:
+                self.server.runner.finish_model_audit(a['payload']['job_id'],seq,0);raise
             self.send_response(200);self.send_header('Content-Type','text/event-stream' if data.get('stream') else 'application/json')
             self.send_header('Content-Length',str(len(response)));self.end_headers();self.wfile.write(response)
         except PermissionError as exc:self.reply(403,{'error':str(exc)[:200]})

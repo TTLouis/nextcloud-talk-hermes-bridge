@@ -68,7 +68,12 @@ tests=subprocess.run(['docker','run','--rm','--network','none','--read-only','--
     '-v',str(root/'deploy')+':/deploy:ro','-v',str(root/'compose.personal.yaml')+':/compose.personal.yaml:ro',
     '-v',str(root/'tests/secure')+':/tests:ro','--entrypoint','python',images['bridge']['id'],'-m','unittest','discover','-s','/tests','-q'],capture_output=True,text=True,timeout=45)
 assert tests.returncode==0,tests.stderr
-write(root/'contract-tests.json',{'image':images['bridge']['id'],'returncode':tests.returncode,'report':tests.stderr.strip()})
+worker_tests=subprocess.run(['docker','run','--rm','--network','none','--read-only','--tmpfs','/tmp:size=64m,mode=1777',
+    '-v',str(root/'tests/worker')+':/tests:ro','--entrypoint','/opt/hermes/.venv/bin/python',images['worker']['id'],
+    '-m','unittest','discover','-s','/tests','-q'],capture_output=True,text=True,timeout=45)
+assert worker_tests.returncode==0,worker_tests.stderr
+write(root/'contract-tests.json',{'image':images['bridge']['id'],'returncode':tests.returncode,'report':tests.stderr.strip(),
+    'worker_image':images['worker']['id'],'worker_returncode':worker_tests.returncode,'worker_report':worker_tests.stderr.strip()})
 print(json.dumps({'tests':tests.stderr.strip(),'assistant_non_admin':True,'assistant_password_entropy_bits':512}),flush=True)
 compose=['docker','compose','--env-file',str(root/'.env'),'-f',str(root/'compose.yaml')]
 db=sqlite3.connect(root/'state-bridge/jobs.sqlite')

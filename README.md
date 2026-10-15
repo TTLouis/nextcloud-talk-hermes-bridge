@@ -16,6 +16,8 @@ Talk attachments. The current deployment uses Docker.
   and create documents or other files using the assistant's private workspace.
 - **Work with your Nextcloud files.** After you opt in, ask the assistant to find,
   read or download files your account can already access, including shared files.
+- **Show the assistant a picture.** Send a PNG, JPEG, WebP or GIF in Talk; the
+  assistant can inspect it with your selected model. GIFs use the first frame.
 - **Generate images and receive files in Talk.** Open the returned attachment,
   then choose whether to save a copy to your own files.
 - **Keep projects organized.** The main assistant can create or reuse a private
@@ -90,7 +92,11 @@ its context.
 When the assistant hands work off, it passes the relevant background, decisions,
 file references and next steps. Your original conversation stays in place;
 unrelated history is not copied into the project. The project task runs through
-the same queue and sends an update back to the main conversation.
+the same queue and sends an update back to the main conversation. On your next
+turn there, the assistant also receives bounded status/result receipts for its
+linked handoffs, so it can discuss their progress without importing unrelated
+project chats. A task that stops partway reports its available progress with an
+explicit incomplete status; it is not automatically retried.
 
 ## Images, attachments and saving
 
@@ -116,9 +122,15 @@ found when saving, a new destination needs a fresh confirmation. Existing files
 and previously displayed destinations are preserved. Folder names are fixed
 when first used, so renaming a conversation does not move saved files.
 
-Image generation is supported. Reading the visual content of an incoming Talk
-photo is not currently connected to the assistant; downloading a cloud image
-does not by itself enable visual analysis.
+Send an image directly in the assistant conversation or its task thread. The
+assistant verifies the original sender, conversation, thread and file identity
+using your own account before reading it. Sending that image permits processing
+that attachment; it does not grant general drive access. Existing first-use setup
+still applies, and declining drive reads does not disable direct Talk images.
+Images are limited to 10 MiB and normalized locally before model input: EXIF is
+removed, the longest edge is at most 2048 pixels, and GIFs use only the first
+frame. HEIC, SVG, video and arbitrary image URLs are not accepted by this input.
+Small or unclear text may need a closer image.
 
 ## Model selection
 

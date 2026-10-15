@@ -12,6 +12,7 @@ from .secure_bridge import Bridge as BaseBridge,Denied,Server
 from .secure_common import request,json_request
 from .assistant_onboarding import INTRO
 from .assistant_feedback import TaskFeedback
+from .assistant_vision import image_reference
 
 class Bridge(TaskFeedback,BaseBridge):
     def __init__(self,config,database):
@@ -20,6 +21,7 @@ class Bridge(TaskFeedback,BaseBridge):
             columns={r['name'] for r in db.execute('PRAGMA table_info(jobs)')}
             if 'thread' not in columns:db.execute('ALTER TABLE jobs ADD COLUMN thread INTEGER NOT NULL DEFAULT 0')
             if 'decision' not in columns:db.execute('ALTER TABLE jobs ADD COLUMN decision TEXT')
+            if 'input_file' not in columns:db.execute('ALTER TABLE jobs ADD COLUMN input_file TEXT')
             for name,kind in [('parent_room','TEXT'),('parent_thread','INTEGER'),('parent_handoff','TEXT'),('reply_room','TEXT'),('reply_thread','INTEGER'),('model_parent_job','TEXT')]:
                 if name not in columns:db.execute('ALTER TABLE jobs ADD COLUMN '+name+' '+kind)
             db.execute('CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY,room TEXT,message TEXT,reply INTEGER,thread INTEGER,title TEXT,status TEXT,next_attempt REAL,attempts INTEGER)')
@@ -68,6 +70,24 @@ class Bridge(TaskFeedback,BaseBridge):
             return {'reaction':True,'uid':uid,'room':room,'message_id':message_id,'emoji':emoji.replace('\ufe0f','')}
         if isinstance(actor,str) and actor.startswith('users/') and (actor[6:],(payload.get('target') or {}).get('id','')) not in self.bindings:
             self.refresh(actor[6:])
+        obj=payload.get('object') or {}
+        if payload.get('type') in ('Create','Activity') and isinstance(obj,dict) and obj.get('type')=='Note':
+            try:
+                content=json.loads(obj.get('content','{}'))
+                if not isinstance(content,dict):raise ValueError('Invalid content')
+                attachment=image_reference(content)
+            except (ValueError,TypeError):raise Denied('Invalid image attachment')
+            if attachment:
+                room=(payload.get('target') or {}).get('id','')
+                if not isinstance(actor,str) or not actor.startswith('users/') or (actor[6:],room) not in self.bindings:raise Denied('Unbound image sender')
+                try:mid=int(obj.get('id',0))
+                except (ValueError,TypeError):raise Denied('Invalid image message')
+                thread=obj.get('threadId',0)
+                if mid<=0 or type(thread) is not int or not 0<=thread<2**63:raise Denied('Invalid image context')
+                caption=content.get('message','')
+                if not isinstance(caption,str) or len(caption)>8000:raise Denied('Invalid image caption')
+                if caption.strip() in ('','{file}','file_shared') or obj.get('name')=='file_shared':caption='请查看我发来的这张图片，简要说明你看到的内容；不确定的地方请明确说明。'
+                return actor[6:],room,mid,caption,thread,attachment
         result=super().event(payload)
         if result is None:return None
         thread=(payload.get('object') or {}).get('threadId',0)
@@ -76,7 +96,8 @@ class Bridge(TaskFeedback,BaseBridge):
 
     def enqueue(self,event):
         if isinstance(event,dict) and event.get('reaction'):return self.enqueue_reaction(event)
-        uid,room,mid,message,thread=event
+        uid,room,mid,message,thread=event[:5]
+        attachment=event[5] if len(event)==6 else None
         if (uid,room) not in self.bindings:raise Denied('Unbound user/project')
         kind='task';artifact=None;decision=None;prompt=message
         jobid=hashlib.sha256((uid+'\0'+room+'\0'+str(mid)).encode()).hexdigest()[:12]
@@ -104,6 +125,7 @@ class Bridge(TaskFeedback,BaseBridge):
             if kind!='consent' and db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running','awaiting_onboarding')").fetchone()[0]>=16:raise Denied('Queue full')
             db.execute('INSERT INTO jobs (id,uid,room,message_id,kind,prompt,artifact,status,created,error,thread,decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (jobid,uid,room,mid,kind,prompt,artifact,'queued',time.time(),None,thread,decision))
+            if attachment:db.execute('UPDATE jobs SET input_file=? WHERE id=?',(json.dumps(attachment),jobid))
             self.add_feedback(db,jobid,kind)
         self.feedback_wake.set()
         return jobid,True
@@ -249,11 +271,20 @@ class Bridge(TaskFeedback,BaseBridge):
                 _,result=json_request(b['runner_url']+'/execute',method='POST',headers={'Authorization':'Bearer '+b['runner_token']},
                     body={'uid':job['uid'],'room':job['room'],'thread':job['thread'],'message_id':job['message_id'],
                     'job_id':job['id'],'kind':job['kind'],'prompt':job['prompt'],'artifact':job['artifact'],'decision':job['decision'],
-                    'inherit_model_from':job['model_parent_job'],'handoff_id':job['parent_handoff']},timeout=700,limit=65536)
+                    'inherit_model_from':job['model_parent_job'],'handoff_id':job['parent_handoff'],
+                    'input_file':json.loads(job['input_file']) if job['input_file'] else None,
+                    'native_input':not bool(job['parent_handoff'] or job['reply_room'])},timeout=700,limit=65536)
+                if 'execution_thread' in result:
+                    actual=result['execution_thread']
+                    if type(actual) is not int or not 0<=actual<2**63:raise Denied('Invalid native execution task')
+                    with self.db() as db:
+                        db.execute('UPDATE jobs SET thread=? WHERE id=?',(actual,job['id']))
+                        job=db.execute('SELECT * FROM jobs WHERE id=?',(job['id'],)).fetchone()
                 if result.get('new_project'):self.refresh(job['uid'])
                 if job['kind']=='consent' and result.get('onboarding_complete') is True:
                     if self.release_onboarding(job['uid']):result['message']+='\n我会按顺序继续你刚才的请求。'
                 text=result.get('message','')
+                if result.get('outcome')=='incomplete':text='这项任务尚未完成；以下是当前进度和阻塞说明。\n\n'+text
                 sequence=0
                 if result.get('model_card'):
                     self.queue_model_card(job,sequence,result['model_card']);sequence+=1
@@ -291,9 +322,9 @@ class Bridge(TaskFeedback,BaseBridge):
                         self.enqueue_handoff(job,handoff)
                         self.queue_message(job,500+index,'已交接任务「'+handoff['title']+'」。相关背景和下一步已交给独立项目，接下来会自动执行并回报这里。\n'+self.config['nextcloud_url']+'/call/'+handoff['target_room'],job['message_id'])
                 if job['parent_room'] and not result.get('details'):
-                    self.queue_message(job,1000,'项目任务有更新：\n'+(result.get('message') or '已返回成果，请到项目线程查看。')[:1500]+'\n项目：'+self.config['nextcloud_url']+'/call/'+job['room'],
+                    self.queue_message(job,1000,('项目任务尚未完成：\n' if result.get('outcome')=='incomplete' else '项目任务有更新：\n')+(result.get('message') or '已返回成果，请到项目线程查看。')[:1500]+'\n项目：'+self.config['nextcloud_url']+'/call/'+job['room'],
                         thread=job['parent_thread'] or 0,room=job['parent_room'])
-            self.finish_job(job['id'],'awaiting_onboarding' if awaiting_onboarding else 'done')
+            self.finish_job(job['id'],'awaiting_onboarding' if awaiting_onboarding else 'incomplete' if result.get('outcome')=='incomplete' else 'done')
         except Exception as exc:
             self.finish_job(job['id'],'failed',type(exc).__name__)
             try:self.queue_message(job,999,'任务未完成（'+job['id']+'）。未自动重试；可以继续说明需求或查看服务状态。',job['message_id'])

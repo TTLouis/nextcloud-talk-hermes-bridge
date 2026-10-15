@@ -88,3 +88,26 @@ The mobile follow-up has 93 active Linux contracts. Native Talk 23 verification
 also exposed the thread API's `title` field; context labels, task navigation and
 new save-folder names now read that field, retaining a `name` fallback. Existing
 folder mappings and pending destinations are not renamed.
+
+## Native images and project-result receipts
+
+The fork now accepts exact owner-authored native Talk raster attachments through
+existing signed webhook and per-user DAV access. Hermes receives bounded local
+images through its pinned native CLI path and the same approved model gateway.
+Linked handoff receipts enter the coordinating model's next turn without other
+task histories. Structured partial results are returned as incomplete instead
+of losing their final explanation. Opaque server-owned request metadata and
+content-free Connector audits identify the originating project/context/task.
+No bot privileges, per-user credentials, Worker networks or global concurrency
+limits are expanded.
+
+Validation includes 113 no-network Linux flow/isolation contracts and six
+Worker raster-decoding contracts. Native Talk 23 cases cover empty rich-text
+parameter lists, REST root-message self-thread IDs versus signed webhook thread
+zero, and 304 responses for an empty message context. These schema differences
+are handled without relaxing owner/project/task checks.
+
+Native Talk file webhooks can omit the actual task thread. Owner-authored
+inputs now resolve their canonical thread from the exact native message before
+model selection/workspace access; result cards use the returned execution
+thread. Ordinary main roots remain thread zero, preserving continuous context.

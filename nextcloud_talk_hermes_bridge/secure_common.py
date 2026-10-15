@@ -43,7 +43,7 @@ class Nextcloud:
         if data is not None:
             headers['Content-Type'] = 'application/x-www-form-urlencoded'
             body = urllib.parse.urlencode(data).encode()
-        _, result = json_request(self.base+'/ocs/v2.php/'+path.lstrip('/')+'?format=json',
+        _, result = json_request(self.base+'/ocs/v2.php/'+path.lstrip('/')+('&' if '?' in path else '?')+'format=json',
                                  method=method, body=body, headers=headers)
         ocs = result.get('ocs', {})
         statuscode = int(ocs.get('meta', {}).get('statuscode',0))

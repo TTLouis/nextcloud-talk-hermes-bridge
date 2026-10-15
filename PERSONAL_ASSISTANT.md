@@ -92,8 +92,45 @@ conditional uploads prevent overwrites; a 412 collision produces a new path and
 a fresh confirmation rather than silently saving elsewhere. Old reservations
 remain reserved. Project renames do not move saved files or pending destinations.
 
-The existing vision capability remains disabled. Talk attachment ingestion into
-a vision model is not part of this release.
+## Direct Talk images and coordination receipts
+
+Signed native Create/Activity file events for PNG/JPEG/WebP/GIF become a single
+deduplicated task with its real owner/room/thread and native message/file IDs.
+Helper/bot attachments and other system/file types remain ignored. The Connector
+re-fetches only that native message, checks the original user and resolves the
+canonical thread (Talk file webhooks can omit it), verifies
+its file ID and ETag through the same user's DAV namespace, and downloads with
+If-Match. Webhook URLs/paths are not download authorities. This exact-attachment
+input does not grant arbitrary drive reads or alter first-use consent.
+
+Originals are capped at 10 MiB and stored only in the task scratchpad. The Worker
+uses the existing pinned Pillow in its sealed Hermes runtime to reject invalid
+or oversized rasters (20 million pixels, dimensions up to 12,000), transpose and
+remove EXIF, composite transparency, take only the first animation frame, and
+produce a JPEG up to 2048 pixels and 2 MiB. It passes that fixed job-local image
+to Hermes' native `--image` input with the already-approved task model. Both
+approved models were checked through the existing gateway; no auxiliary model,
+new credential or remote image downloader is enabled. Model-request bodies are
+bounded at 16 MiB for image history; MCP tool bodies retain their 4 MiB limit.
+
+Each model call receives server-owned opaque project/context/task metadata and a
+local content-free audit receipt with route, model, time and HTTP status. Worker
+metadata cannot spoof another context; concurrent calls receive distinct audit
+sequence numbers. Visibility of metadata in a gateway's UI depends on that UI;
+the Connector audit remains authoritative for routing, not for permissions.
+
+Before an agent turn, the Connector injects at most six bounded handoff result
+receipts whose source exactly matches this owner/room/thread. It revalidates
+access to each target private room and excludes removed/restricted rooms, raw
+chat history and handoff source prompts. Receipts distinguish running, done,
+awaiting_choice, failed and incomplete states. They are untrusted result data,
+not new instructions or authorization.
+
+A structured nonzero Hermes result with useful final text is returned as
+incomplete rather than discarded. The original text is retained by the same
+mobile-detail flow, task state and parent notification identify it as unfinished,
+and the billable task is not retried automatically. Empty failures still fail
+closed with the existing generic error notice.
 
 ## Text model choices
 
