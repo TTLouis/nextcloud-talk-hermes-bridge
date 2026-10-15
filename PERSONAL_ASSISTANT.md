@@ -2,9 +2,9 @@
 
 The current application is a general Hermes assistant reached through Nextcloud
 Talk. The image-only v1 deployment is historical; its AI Temporary workflow must
-not be used for new tasks. Access is explicitly provisioned for TTauth and
-MMFelix. MMFelix's private main conversation has a welcome/reaction card;
-drive consent remains unset until MMFelix makes the real choice.
+not be used for new tasks. Access is provisioned explicitly for each account.
+Every new user receives a private main conversation and a welcome/reaction card; drive consent remains
+unset until that user makes the real choice.
 
 ## Projects and tasks
 
@@ -199,15 +199,16 @@ created. `deploy/onboard_tenant.py --slug SAFE_SLUG` sends the deterministic gui
 and reaction card without a synthetic user request. Existing pending welcome
 cards are reused when real requests arrive before the choice.
 
-MMFelix deployment verification used a disposable private conversation: native
-assistant-authored PNG download succeeded for MMFelix; Louis received 404 for
-both MMFelix's file namespace and the same random filename in his own namespace;
-anonymous access received 401. Both main-room cross-account requests returned
+A two-user reference deployment was verified with a disposable private
+conversation: native assistant-authored PNG download succeeded for its owner;
+the other account received 404 for both the owner's file namespace and the same
+random filename in its own namespace; anonymous access received 401. Both main-room cross-account requests returned
 404. Cross-UID/room dispatch, Worker execution and Delivery room/question binding
 failed with 401/403. The test conversation, delivery copy, marker and binding
-were removed. Louis's consent/settings/artifact records were unchanged. No model
-task ran for MMFelix and no read consent was fabricated. MMFelix's actual mobile
-welcome choice and first real model/image task remain to be tested by that user.
+were removed. The existing user's consent/settings/artifact records were
+unchanged. No model task ran for the newly provisioned user and no read consent
+was fabricated. A new user's actual mobile welcome choice and first real
+model/image task must be tested separately by that user.
 Build Dockerfile.secure targets bridge, connector, worker and delivery, then pin
 immutable local image IDs. `deploy/deploy_personal.py` preserves v1 Compose/.env
 backups, checks for active queue work, runs container contracts before switching,
@@ -229,7 +230,7 @@ task, produced a budget artifact and reported back. Native MCP question → numb
 reaction → same-session resume passed; a separate task retained its budget and
 did not acquire the other task's test memory. The user confirmed real mobile
 image opening and a reaction choice with the correct confirmation reply.
-Mobile thread navigation, push notifications and MMFelix's first real user
+Mobile thread navigation, push notifications and each new user's actual
 onboarding require separate verification; don't infer them from backend tests.
 
 Do not blindly restart v1: it rejects the newly added helper participant and does

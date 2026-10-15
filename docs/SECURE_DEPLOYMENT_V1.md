@@ -19,7 +19,7 @@ is installed into the host Python environment.
 - Hermes and its stdio MCP image server start only for a task and exit afterward.
 - Save/discard decisions use deterministic host logic and do not start a model.
 - Restarted in-flight work is marked interrupted, not automatically re-billed.
-- Initial deployment enables only the explicitly selected TTauth owner/private room.
+- Initial deployment enables only the explicitly selected owner/private room.
   A future user requires a new private room, dedicated credential, separate Runner
   container/state volume, and explicit binding. The LLM cannot choose its identity.
 

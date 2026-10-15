@@ -23,12 +23,12 @@ docker compose --env-file /opt/docker/hermes-talk/.env -f /opt/docker/hermes-tal
 Stop the Compose services to disable the assistant while preserving its state.
 Do not use `down -v`. Before an upgrade, verify the global queue is idle; the
 deployment helper checks both before building and immediately before switching.
-TTauth and MMFelix are explicitly provisioned. Each has its own Connector,
-Worker, private Worker network, workspace, credential, consent and model state.
-The Bridge/Delivery are shared, producing six containers with one global task
-queue. `deploy/tenant_config.py` generates Compose from validated protected
+Each explicitly provisioned user has its own Connector, Worker, private
+Worker network, workspace, credential, consent and model state.
+Bridge and Delivery are shared; two users produce six containers with one
+global task queue. `deploy/tenant_config.py` generates Compose from validated protected
 registrations; upgrades retain every tenant instead of rebuilding a singleton.
-MMFelix's welcome card awaits its owner's real allow/decline choice.
+A new user's welcome card awaits its owner's real allow/decline choice.
 
 To provision an explicitly authorized new user, run server-local
 `deploy/add_tenant.py --uid STABLE_UID --slug SAFE_SLUG --display-name EXACT_NAME`,

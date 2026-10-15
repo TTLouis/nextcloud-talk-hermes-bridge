@@ -1,289 +1,173 @@
-> Maintained personal-assistant fork: use [PERSONAL_ASSISTANT.md](PERSONAL_ASSISTANT.md) and [SECURE_DEPLOYMENT.md](SECURE_DEPLOYMENT.md). The upstream instructions below are historical provenance, not current deployment instructions.
+# Hermes Personal Assistant for Nextcloud Talk
 
-# Nextcloud Talk Hermes Bridge
+A self-hosted personal assistant you can use from the Nextcloud Talk mobile or
+desktop app. Ask a question, work through a task, generate an image, or use your
+Nextcloud files after granting read access.
 
+This is a maintained fork of
+[Nextcloud Talk Hermes Bridge](https://github.com/robertlmann02/nextcloud-talk-hermes-bridge),
+powered by [Hermes Agent](https://github.com/NousResearch/hermes-agent).
+It adds private workspaces, per-user permissions, project handoffs and native
+Talk attachments. The current deployment uses Docker.
 
-A small webhook bridge that connects a Nextcloud Talk bot to [Hermes Agent](https://hermes-agent.nousresearch.com/docs).
+## What you can do
 
-It receives signed Nextcloud Talk bot webhook events, runs `hermes chat -q` with a configurable profile/persona/toolset, and posts the final answer back to the Talk room with signed bot messages.
+- **Get work done from a conversation.** Discuss ideas, plan a task, calculate,
+  and create documents or other files using the assistant's private workspace.
+- **Work with your Nextcloud files.** After you opt in, ask the assistant to find,
+  read or download files your account can already access, including shared files.
+- **Generate images and receive files in Talk.** Open the returned attachment,
+  then choose whether to save a copy to your own files.
+- **Keep projects organized.** The main assistant can create or reuse a private
+  project conversation, hand off relevant context, and report the result back.
+- **Choose your model.** Set your personal default or override just the next task
+  in the current conversation or thread.
 
-## Features
+For example:
 
-- Verifies Nextcloud Talk webhook signatures.
-- Posts signed bot replies back to the same Talk room.
-- Supports authenticated proactive delivery for scheduled reports, monitoring alerts, and Hermes cron/webhook jobs via `POST /deliver`.
-- Ignores bot-originated messages to avoid reply loops.
-- Preserves short-term per-room context for follow-ups like “make it shorter” or “continue that.”
-- Adds a stale-context guard that treats the newest user message as controlling and tells Hermes to use session/source/git history for “what we had before” style requests instead of blindly trusting old room state.
-- Optionally enriches prompts from a local SQLite memory service: workspace, peers, sessions, messages, conclusions, and representation cards.
-- Passes uploaded-file metadata from Talk events into the Hermes prompt.
-- Handles Talk file-share and voice-message webhook shapes that arrive as non-Note JSON Create events.
-- Optionally transcribes Talk voice/audio shares when the bridge host has local Nextcloud file access, ffmpeg, and whisper.cpp available.
-- Resolves Talk image shares into a local readable cache and instructs Hermes to call `vision_analyze`, so assistants can inspect uploaded pictures without asking the user to re-upload them elsewhere.
-- Supports Hermes profiles, skills, toolsets, and source labels.
-- Supports long-running jobs with background wait + heartbeat messages.
-- Uses only Python standard library at runtime.
+> Read the notes in my trip folder and make a packing checklist.
+>
+> Generate a simple illustrated cover for this project.
+>
+> Help me plan the renovation. Keep it in its own project and report back here.
 
-## Requirements
+Available models and image generation depend on your administrator's configured
+model service.
 
-- Python 3.11+
-- A working Hermes Agent CLI (`hermes`)
-- A Nextcloud server with the Talk app and Talk bot webhook support
-- A public or reverse-proxied HTTPS endpoint pointing to this bridge's `/hook` path
+## Start using the assistant
 
-## Install
+Your administrator first connects your Nextcloud account to a private assistant
+conversation. Open **`主助理 · Hermes`** in Talk and read the welcome card.
 
-```bash
-git clone https://github.com/YOUR-ORG/nextcloud-talk-hermes-bridge.git
-cd nextcloud-talk-hermes-bridge
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -e .
-cp .env.example .env
+Choose **✅** to allow task-directed reads of your Nextcloud files, or **❌** to
+continue without drive access. Either choice completes setup. You can still
+chat, generate images and work with the private workspace after declining.
+The assistant does not automatically scan your whole drive.
+
+Then send a request normally. If you sent a request before completing setup,
+it waits for your choice and continues afterward. Ordinary replies in the main
+conversation appear as standalone messages.
+
+When a decision is needed, tap the reaction shown below the question: **✅ / ❌**
+for a yes/no choice, or **1️⃣–5️⃣** for multiple options. Each card is bound to its
+own task and can only be answered by its owner.
+
+The current welcome messages and control commands are in Chinese. You can write
+ordinary requests in the language supported by your chosen model.
+
+## Projects and tasks
+
+Start in the main assistant; you do not need to create a project manually.
+
+| Conversation | Purpose |
+| --- | --- |
+| `主助理 · Hermes` | Your main assistant for everyday requests and coordinating work. |
+| `项目 · <name>` or `主题 · <name>` | A dedicated private conversation for a project or subject. |
+| A named Talk thread inside a project | One task with its own context, notes and working files. |
+
+A **thread** groups messages about one task inside a conversation. Open that
+thread to continue the task; other task histories are not automatically added to
+its context.
+
+When the assistant hands work off, it passes the relevant background, decisions,
+file references and next steps. Your original conversation stays in place;
+unrelated history is not copied into the project. The project task runs through
+the same queue and sends an update back to the main conversation.
+
+## Images, attachments and saving
+
+The assistant sends finished files as native Talk attachments under the separate
+**`Hermes 助手`** delivery account. Open the attachment first, then use its save
+card:
+
+- **✅ Save:** create your own copy at the destination shown on the card, under
+  `AI Outputs/<project>/`.
+- **❌ Do not save:** leave the delivered attachment available without creating
+  a formal copy in your output folder.
+
+Talk may show a delivered attachment in its shared-file area. Drafts, scratch
+files and intermediate results stay in the assistant's Docker workspace.
+Choosing not to save does not delete the delivered attachment or private
+snapshot; automatic expiry is not currently implemented.
+
+## Model selection
+
+Send **`模型`** or **`/model`**, then tap the cards to choose:
+
+- **My default:** applies to your future tasks across your projects.
+- **Next task only:** applies to the next task in this conversation or thread,
+  including its handoff and follow-up choices. Later independent tasks return
+  to your default.
+- **Clear the next-task override** or **cancel**.
+
+The reference configuration defaults to `gpt-6.1-sol` and also offers
+`gpt-5.6-terra`. Your administrator controls the approved model list. Your choices
+do not affect other users, and changing a default does not switch a running task.
+
+## Useful commands
+
+These are optional shortcuts; ordinary requests do not need a command prefix.
+
+| Send in Talk | Action |
+| --- | --- |
+| `使用指南`, `帮助` or `重新介绍` | Show the usage guide again. |
+| `模型`, `模型设置`, `切换模型` or `/model` | Open model settings. |
+| `项目列表` | List your registered projects. |
+| `任务列表` | List tasks in the current conversation. |
+| `新项目 <name>` | Create a dedicated project conversation. |
+| `新任务 <title>` | Create a named task thread. |
+| `同意读取网盘` | Allow task-directed reads of files accessible to your account. |
+| `撤销网盘授权` or `暂不授权` | Turn off drive reads. |
+
+Save and other confirmation cards can normally be answered with reactions.
+
+## Your data and permissions
+
+Each provisioned user has separate credentials, a Worker container, workspace,
+task history, consent and model preferences. File access uses that user's native
+Nextcloud permissions through MCP tools. Permission to read files does not grant
+permission to save, overwrite or delete them.
+
+The delivery account has no administrator privileges. Long-lived Nextcloud and
+model-service credentials stay outside the Worker; tasks receive temporary,
+scoped access through their user's Connector.
+
+One agent task runs at a time across the deployment. Hermes and its MCP
+subprocesses start when a task runs and exit afterward; lightweight services
+stay available. The Docker host must remain awake to receive new Talk messages.
+
+## Self-hosting and current scope
+
+The reference deployment has been verified with Nextcloud **33.0.3**, Talk
+**23.0.11**, and Hermes **v0.22.0**, using an external model service. It uses a
+shared Bridge and Delivery service plus one Connector and Worker per user.
+
+Installation is currently an administrator-managed Docker deployment. The
+deployment helpers reflect the reference topology and require adapting hostnames,
+container names, networking and model configuration; they are not a portable
+one-command installer.
+
+- [Deployment and operations](SECURE_DEPLOYMENT.md)
+- [Architecture, permissions and behavior](PERSONAL_ASSISTANT.md)
+- [Upstream comparison and attribution](docs/UPSTREAM.md)
+
+Gmail and other external account tools are not connected. The upstream voice,
+uploaded-media, cron and AppAPI installation features are not exposed by this
+fork's current assistant runtime. The retained upstream files and release
+archives do not describe an installation path for this version.
+
+## Development
+
+Run the existing contracts with Python 3.11 or newer:
+
+```sh
+python -m unittest discover -s tests/secure -v
 ```
 
-Edit `.env`:
+Run Linux-specific filesystem contracts in Linux or Docker. Runtime dependencies
+for Hermes are built into the Worker image rather than installed on the host.
 
-```bash
-TALK_BOT_SECRET=replace-with-nextcloud-talk-bot-secret
-TALK_DELIVER_SECRET=replace-with-bridge-delivery-api-key
-NEXTCLOUD_URL=https://nextcloud.example.com
-TALK_BRIDGE_PORT=8788
-HERMES_BIN=/path/to/hermes
-HERMES_PROFILE=default
-HERMES_HOME_DIR=/home/your-user
-ASSISTANT_NAME=Hermes Talk Assistant
-ASSISTANT_ROLE=You are a helpful private assistant inside Nextcloud Talk.
-```
+## License
 
-Run locally:
-
-```bash
-set -a
-. ./.env
-set +a
-python -m nextcloud_talk_hermes_bridge.bridge
-```
-
-Health check:
-
-```bash
-curl http://127.0.0.1:8788/health
-# ok
-```
-
-## systemd user service
-
-```bash
-mkdir -p ~/.config/systemd/user
-cp systemd/nextcloud-talk-hermes-bridge.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now nextcloud-talk-hermes-bridge.service
-systemctl --user status nextcloud-talk-hermes-bridge.service
-```
-
-The sample unit assumes the repo lives at:
-
-```text
-~/nextcloud-talk-hermes-bridge
-```
-
-Adjust `WorkingDirectory`, `EnvironmentFile`, and `ExecStart` if you install elsewhere.
-
-## Nextcloud Talk bot setup
-
-Exact admin screens vary by Nextcloud/Talk version, but the bridge expects:
-
-- Webhook URL: `https://your-public-host.example.com/hook`
-- Shared secret: same value as `TALK_BOT_SECRET`
-- Bot URL base / Nextcloud URL: same base as `NEXTCLOUD_URL`, for example `https://nextcloud.example.com`
-
-The bridge handles:
-
-- Incoming webhook signature headers:
-  - `X-Nextcloud-Talk-Random`
-  - `X-Nextcloud-Talk-Signature`
-- Outgoing bot message signature headers:
-  - `X-Nextcloud-Talk-Bot-Random`
-  - `X-Nextcloud-Talk-Bot-Signature`
-
-## Important configuration
-
-- `HERMES_PROFILE`: Hermes profile to run, such as `default` or a dedicated assistant profile.
-- `TALK_DELIVER_SECRET`: separate bearer token for proactive outbound delivery calls to `/deliver`. Keep this distinct from `TALK_BOT_SECRET`.
-- `HERMES_TOOLSETS`: comma-separated toolsets exposed to Hermes.
-- `HERMES_SKILLS`: comma-separated skills to pre-load.
-- `TALK_BRIDGE_SKILL_STATUS`: `1`/`0` toggle. When enabled, the bridge prompt tells Hermes to explicitly report any skill creation, patch, edit, or deletion in its final Talk reply, including the skill names changed.
-- `TALK_RECEIVED_REACTION`: optional emoji reaction, for example `👀`, that the bridge adds to an inbound Talk message before Hermes starts working. Leave unset to disable. Reaction failures are logged but never block the final reply or the existing `Working.` / background heartbeat messages.
-- `HERMES_YOLO`: `1` enables non-interactive tool execution. Set to `0` if you want a safer/default Hermes mode.
-- `TALK_BRIDGE_SOFT_TIMEOUT`: seconds before the bridge posts a “still working” notice and keeps waiting.
-- `TALK_BRIDGE_HARD_TIMEOUT`: maximum runtime before stopping the Hermes process.
-- `TALK_CONTEXT_DIR`: where room context JSONL files are stored. The generated context packet includes a priority rule: newest user message first, room state lower priority, and source/session/git history for “what was there before” requests.
-- `TALK_CONTEXT_INCLUDE_HISTORY`: optional `1`/`0` override for inlining bridge-managed recent Talk turns into each Hermes `-q` payload. Defaults to `1` for one-shot sessions and `0` when `TALK_HERMES_RESUME_SESSION`, `HERMES_RESUME_SESSION`, or `HERMES_SESSION_ID` is set, because Hermes resume already replays session history.
-- `TALK_PERSONA_SYSTEM_PROMPT`: `1` by default, which sends stable bridge persona/rules through Hermes' non-persisted `HERMES_EPHEMERAL_SYSTEM_PROMPT` instead of embedding them in every persisted user prompt. Set to `0` only for older Hermes builds that do not support the ephemeral prompt environment variable.
-- `TALK_LOCAL_MEMORY_CONTEXT`: `1`/`0` toggle for local SQLite memory context injection. Defaults to `1`.
-- `TALK_MEMORY_NAMESPACE`: memory workspace/namespace for this bridge, for example `personal`, `assistant`, or `support`. Defaults to `HERMES_PROFILE`, otherwise `default`.
-- `TALK_MEMORY_DB_PATH`: optional path to a compatible SQLite memory database. Defaults to `$HERMES_HOME/local-memory/memory.sqlite3`.
-- `TALK_MEMORY_RETRIEVAL_SCOPE`: `room` by default. Room mode keeps raw indexed Talk messages limited to the current room/session while still allowing durable namespace memories and representation cards. Set to `workspace` only for deliberate cross-room diagnostics.
-- `TALK_APPROVAL_PROMPTS`: optional approval broker. Set to `1` to relay Hermes protected-action prompts into the same Talk room. Approval replies supported: `/approve once`, `/approve session`, `/approve always`, `/deny`, plus simple yes/no aliases. When enabled, the bridge omits `--yolo` so Hermes can request approvals.
-- `TALK_APPROVAL_TIMEOUT`: approval wait timeout in seconds, default `300`; timeout denies fail-closed.
-
-Optional Nextcloud AI/document context settings:
-
-- `NEXTCLOUD_AI_CONTEXT`: `1`/`0` toggle for injecting bounded candidate file matches into the Hermes prompt. Defaults to `0`.
-- `NEXTCLOUD_AI_CONTEXT_MODE`: `files_search` / `ocs_files` for Nextcloud OCS file search.
-- `NEXTCLOUD_AI_USER` / `NEXTCLOUD_AI_APP_PASSWORD`: Nextcloud user/app password for OCS file search.
-- `NEXTCLOUD_AI_CONTEXT_LIMIT`, `NEXTCLOUD_AI_CONTEXT_MAX_CHARS`, `NEXTCLOUD_AI_CONTEXT_TIMEOUT`, and `NEXTCLOUD_AI_CONTEXT_MIN_QUERY_CHARS`: bounds for result count, injected context size, network/process timeout, and query filtering.
-
-Optional voice/audio transcription settings:
-
-- `NEXTCLOUD_DATA_ROOT`: local Nextcloud data root, used to resolve shared audio files. Defaults to `/var/www/html/data`.
-- `TALK_NEXTCLOUD_CONTAINER`: Docker container name used for resolving share IDs through Nextcloud config/PDO. Defaults to `nextcloud`.
-- `TALK_NEXTCLOUD_USER`: fallback Nextcloud user ID for rendered `{file}` payloads that only include a display path/name.
-- `TALK_FFMPEG_BIN`: ffmpeg binary for converting audio before transcription. Defaults to `ffmpeg`.
-- `TALK_WHISPER_BIN`: whisper.cpp binary. Defaults to `whisper-cli`.
-- `TALK_WHISPER_MODEL`: whisper.cpp model path. If unset or missing, transcription is skipped.
-- `TALK_TRANSCRIBE_MAX_BYTES`: max audio file size to transcribe. Defaults to 50 MiB.
-- `TALK_TRANSCRIBE_TIMEOUT`: transcription timeout in seconds. Defaults to 180.
-
-Optional image/media vision settings:
-
-- `TALK_MEDIA_CACHE_DIR`: cache directory for user-readable copies of Talk image shares. Defaults to `~/.cache/talk-media-vision`.
-- `TALK_IMAGE_MAX_BYTES`: max image file size to copy for vision analysis. Defaults to 25 MiB.
-
-## Proactive delivery and native Hermes cron delivery
-
-`POST /deliver` lets a trusted local scheduler, Hermes cron job, or monitoring webhook post a bot message into a Talk room without waiting for an inbound Talk webhook first.
-
-For Hermes cron, this repository ships a native `nextcloud_talk` delivery integration. Install the bridge package, then install the bundled Hermes platform into the Hermes Agent tree:
-
-```bash
-nextcloud-talk-hermes-cron-install --hermes-repo /path/to/hermes-agent
-```
-
-Set the Hermes gateway environment:
-
-```bash
-NEXTCLOUD_TALK_DELIVER_URL=http://127.0.0.1:8788/deliver
-NEXTCLOUD_TALK_HOME_ROOM=abc123
-NEXTCLOUD_TALK_DELIVER_SECRET=replace-with-bridge-delivery-api-key
-```
-
-After restarting Hermes gateway, cron jobs can use native delivery:
-
-```bash
-hermes cron create "0 8 * * *" "Write a short morning status report." --deliver nextcloud_talk
-```
-
-This is not a per-job script. Hermes registers `nextcloud_talk` as a platform delivery target and uses the bridge's standalone `/deliver` sender for scheduled output.
-
-```bash
-curl -X POST http://127.0.0.1:8788/deliver \
-  -H "Authorization: Bearer <delivery-secret>" \
-  -H "Content-Type: application/json" \
-  -d '{"room_token":"abc123","message":"Daily status report: all services healthy."}'
-```
-
-Request fields:
-
-- `room_token` or `token`: required Talk room token.
-- `message`: required bot message text.
-- `actor`: optional source label for bridge logs, for example `cron` or `monitoring`.
-- `reply_to` / `replyTo`: optional Talk message ID to reply to; usually omitted for scheduled posts.
-- `thread_title` / `threadTitle`: optional Talk thread title. When set without `reply_to`, Talk creates a thread for the bot message on servers with thread support.
-- `thread_id` / `threadId`: optional Talk thread ID. When set without `reply_to`, Talk posts into that existing thread without quoting a specific message.
-- `silent`: optional boolean to suppress notifications for the bot message.
-- `reference_id` / `referenceId`: optional app-defined reference ID for later correlation.
-
-Responses are JSON. A successful delivery returns:
-
-```json
-{"ok": true, "status": "delivered", "room_token": "abc123", "post_status": 200}
-```
-
-When delivery succeeds, the bridge records the outbound assistant message in the same short-term room context and local SQLite memory path used for normal reactive replies. That way, if a user responds to a scheduled report with “what did you mean by that?”, Hermes can see the proactive message as prior assistant context.
-
-## Hermes skill creation from Talk
-
-The bridge can let Hermes create or update skills when the deployed Hermes profile has the `skills` toolset enabled. The default `HERMES_TOOLSETS` includes `skills`, so a trusted deployment can create, patch, edit, or delete skills using the normal Hermes skill tools.
-
-For visibility in Nextcloud Talk, `TALK_BRIDGE_SKILL_STATUS=1` is enabled by default. With that setting, the bridge instructs Hermes to state skill changes in the final Talk reply, for example:
-
-```text
-Skills changed: created field-service-workflow; patched custom-linux-live-build
-```
-
-If no skill is created, Hermes should say so when the user specifically asked for a skill. Keep `HERMES_YOLO` and broad toolsets limited to trusted private assistants, because skill tools can write durable procedure files under the selected Hermes profile.
-
-## Local SQLite memory service
-
-The bridge includes an optional local SQLite memory service for deployments that need better follow-up handling than short-term room history alone.
-
-When `TALK_LOCAL_MEMORY_CONTEXT=1`, the bridge will:
-
-- create/use a local SQLite database at `TALK_MEMORY_DB_PATH` or `$HERMES_HOME/local-memory/memory.sqlite3`;
-- keep memory separated by `TALK_MEMORY_NAMESPACE`;
-- index Talk/Hermes messages with FTS5;
-- keep raw indexed Talk message retrieval scoped to the current room/session by default so one room's follow-up context does not leak into another;
-- read compatible durable memories, conclusions, and representation cards when building the prompt context;
-- avoid mixing namespaces across assistants, users, or bridge instances.
-
-This is local-only storage. It does not require a cloud memory provider.
-
-## Security notes
-
-- Do **not** commit `.env` or log files.
-- Use a strong random `TALK_BOT_SECRET`.
-- Run this bridge as a limited user.
-- Be careful with `HERMES_YOLO=1` and broad toolsets. That is powerful and should only be used where the Hermes profile and host are trusted.
-- Put the bridge behind HTTPS.
-- Keep separate assistants/users in separate Hermes profiles and separate bridge instances.
-
-## Development checks
-
-```bash
-python -m compileall nextcloud_talk_hermes_bridge
-python -m nextcloud_talk_hermes_bridge.bridge
-```
-
-The second command needs environment variables and will start the server.
-
-## Nextcloud App Store / AppAPI ExApp package
-
-This repository now includes an Option A Nextcloud External App (ExApp) wrapper for App Store submission. The App Store app ID is `hermes_talk_bridge`, and the runtime is delivered as an AppAPI-managed Docker image declared in `appinfo/info.xml`.
-
-AppAPI lifecycle endpoints implemented by the bridge:
-
-- `GET /heartbeat` — AppAPI health probe.
-- `POST /init` — initialization acknowledgement.
-- `PUT /enabled?enabled=1|0` — enable/disable lifecycle acknowledgement.
-- `POST /hook` — Nextcloud Talk bot webhook receiver.
-- `POST /deliver` — authenticated proactive delivery endpoint for cron/report/alert messages.
-
-Build and smoke-test locally before release:
-
-```bash
-python -m compileall nextcloud_talk_hermes_bridge
-python -m pytest -q
-python scripts/build_appstore_package.py --allow-unsigned
-docker build -t nextcloud-talk-hermes-bridge:local .
-```
-
-For App Store packaging details, see `EXAPP_SUBMISSION.md`.
-
-
-## Talk slash commands
-
-Nextcloud Talk server/client handling of leading-slash text varies by version and client. The bridge first handles normal slash forms like `/status` or `Assistant /status`. If a client intercepts those before they reach the bot, use one of the bridge-safe fallbacks instead: `!status`, `bridge status`, `Assistant status`, or just `status` in the bot room.
-
-| Command | Purpose |
-|---|---|
-| `/help` | Show available bridge commands. |
-| `/status` | Show bridge, Hermes profile, memory namespace, and toolset status. |
-| `/memory` | Show whether local memory / Talk context is enabled and configured. |
-| `/tools` | Show enabled Hermes toolsets. |
-| `/reset` | Clear the current room's short-term Talk context while retaining durable memory. |
-| `/version` | Show bridge app/version information. |
-| `/queue` | Explain long-running/background task behavior and timeout settings. |
-
-Slash commands are handled by the bridge before invoking Hermes when possible, so lightweight status/reset commands stay fast and do not spend model tokens.
+[MIT](LICENSE). Original upstream attribution is retained. This fork is
+independently maintained and is not an official Nextcloud or Hermes release.
