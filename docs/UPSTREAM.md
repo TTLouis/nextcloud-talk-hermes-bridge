@@ -64,3 +64,14 @@ the upstream README or package version alone does not establish compatibility.
 This comparison did not merge upstream runtime changes or change a running
 deployment. See [the user README](../README.md) for current capabilities and
 [deployment notes](../SECURE_DEPLOYMENT.md) for the maintained runtime.
+
+## Scoped adaptation after the comparison
+
+The maintained runtime now adapts received/queued/running feedback using the
+existing signed bot APIs. Its independent bounded sender preserves the one-job
+queue, owner/project/thread routing and final-result ordering. It does not import
+AppAPI lifecycle writes, upstream room-only approvals, identity fallbacks or the
+60-minute timeout. Main-assistant instructions preserve continuous context and
+limit initiative to relevant current requests and existing authorization.
+Active Linux contracts now total 76, including feedback routing, replay, failure,
+unsigned ingress, in-flight completion ordering and cross-user isolation.

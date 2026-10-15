@@ -46,11 +46,19 @@ The assistant does not automatically scan your whole drive.
 
 Then send a request normally. If you sent a request before completing setup,
 it waits for your choice and continues afterward. Ordinary replies in the main
-conversation appear as standalone messages.
+conversation appear as standalone messages. The main assistant keeps its
+continuous context, follows relevant agreed next steps, and can organize
+independent work without requiring a context-reset command.
 
 When a decision is needed, tap the reaction shown below the question: **✅ / ❌**
 for a yes/no choice, or **1️⃣–5️⃣** for multiple options. Each card is bound to its
 own task and can only be answered by its owner.
+
+A 👀 reaction acknowledges a newly queued task. If it waits more than 15 seconds,
+the assistant sends a queue notice. Tasks still running after 3 seconds receive
+a processing notice, followed by an update every 3 minutes while needed. These
+status messages use the existing bot permissions and do not make model calls.
+They do not show another user's tasks or queue details.
 
 The current welcome messages and control commands are in Chinese. You can write
 ordinary requests in the language supported by your chosen model.

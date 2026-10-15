@@ -11,8 +11,9 @@ import urllib.parse
 from .secure_bridge import Bridge as BaseBridge,Denied,Server
 from .secure_common import request,json_request
 from .assistant_onboarding import INTRO
+from .assistant_feedback import TaskFeedback
 
-class Bridge(BaseBridge):
+class Bridge(TaskFeedback,BaseBridge):
     def __init__(self,config,database):
         super().__init__(config,database)
         with self.db() as db:
@@ -26,6 +27,7 @@ class Bridge(BaseBridge):
             if 'choice' not in notification_columns:db.execute('ALTER TABLE notifications ADD COLUMN choice TEXT')
             db.execute('CREATE TABLE IF NOT EXISTS choices (room TEXT,message_id INTEGER,uid TEXT,thread INTEGER,execution_room TEXT,execution_thread INTEGER,options TEXT,choice_group TEXT,status TEXT,job_id TEXT,PRIMARY KEY(room,message_id))')
         self.users={b['uid']:b for b in config['bindings']}
+        self.init_feedback()
 
     def refresh(self,uid):
         if uid not in self.users:raise Denied('Unknown user')
@@ -48,6 +50,7 @@ class Bridge(BaseBridge):
         return resumed
 
     def event(self,payload):
+        if not isinstance(payload,dict) or not isinstance(payload.get('actor') or {},dict):raise Denied('Invalid actor')
         actor=(payload.get('actor') or {}).get('id','') if isinstance(payload,dict) else ''
         if actor=='users/'+self.config['assistant_uid']:return None
         if isinstance(actor,str) and actor.startswith('bots/'):return None
@@ -101,6 +104,8 @@ class Bridge(BaseBridge):
             if kind!='consent' and db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('queued','running','awaiting_onboarding')").fetchone()[0]>=16:raise Denied('Queue full')
             db.execute('INSERT INTO jobs (id,uid,room,message_id,kind,prompt,artifact,status,created,error,thread,decision) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (jobid,uid,room,mid,kind,prompt,artifact,'queued',time.time(),None,thread,decision))
+            self.add_feedback(db,jobid,kind)
+        self.feedback_wake.set()
         return jobid,True
 
     def enqueue_reaction(self,event):
@@ -122,13 +127,15 @@ class Bridge(BaseBridge):
                 (jobid,uid,room,c['message_id'],decision['kind'],'User selected a bound reaction choice',decision.get('artifact'),'queued',time.time(),None,thread,decision.get('decision'),c['room'],c['thread'],parent['parent_room'] if parent else None,parent['parent_thread'] if parent else None,parent['parent_handoff'] if parent else None))
             db.execute("UPDATE choices SET status='resolved',job_id=? WHERE uid=? AND choice_group=? AND status='pending'",(jobid,uid,c['choice_group']))
             db.execute("UPDATE choices SET status='selected' WHERE room=? AND message_id=?",(c['room'],c['message_id']))
+            self.add_feedback(db,jobid,decision['kind'])
+        self.feedback_wake.set()
         if decision['kind']=='consent' and decision.get('decision')=='deny':
             b=self.bindings[(uid,room)]
             json_request(b['runner_url']+'/consent',method='POST',timeout=15,headers={'Authorization':'Bearer '+b['runner_token']},
                 body={'uid':uid,'room':room,'thread':thread,'job_id':jobid,'decision':'deny'})
         return jobid,True
 
-    def post(self,room,message,reply=0,thread=0,title=None):
+    def post(self,room,message,reply=0,thread=0,title=None,timeout=30):
         nonce=os.urandom(32).hex();signature=hmac.new(self.config['bot_secret'].encode(),(nonce+message).encode(),hashlib.sha256).hexdigest()
         fields={'message':message}
         if title:fields['threadTitle']=title
@@ -136,7 +143,7 @@ class Bridge(BaseBridge):
         elif thread:fields['threadId']=thread
         request(self.config['nextcloud_url']+'/ocs/v2.php/apps/spreed/api/v1/bot/'+room+'/message',method='POST',
             body=urllib.parse.urlencode(fields).encode(),headers={'OCS-APIRequest':'true','Content-Type':'application/x-www-form-urlencoded',
-            'X-Nextcloud-Talk-Bot-Random':nonce,'X-Nextcloud-Talk-Bot-Signature':signature},limit=65536)
+            'X-Nextcloud-Talk-Bot-Random':nonce,'X-Nextcloud-Talk-Bot-Signature':signature},limit=65536,timeout=timeout)
 
     def queue_message(self,job,sequence,message,reply=0,thread=None,title=None,room=None,quote=False):
         ident=job['id']+'-'+str(sequence)
@@ -170,11 +177,11 @@ class Bridge(BaseBridge):
                 if choice['uid']==uid and choice['group']=='consent':return True
         return False
 
-    def react(self,room,message_id,emoji):
+    def react(self,room,message_id,emoji,timeout=30):
         nonce=os.urandom(32).hex();signature=hmac.new(self.config['bot_secret'].encode(),(nonce+emoji).encode(),hashlib.sha256).hexdigest()
         request(self.config['nextcloud_url']+'/ocs/v2.php/apps/spreed/api/v1/bot/'+room+'/reaction/'+str(message_id),method='POST',
             body=urllib.parse.urlencode({'reaction':emoji}).encode(),headers={'OCS-APIRequest':'true','Content-Type':'application/x-www-form-urlencoded',
-            'X-Nextcloud-Talk-Bot-Random':nonce,'X-Nextcloud-Talk-Bot-Signature':signature},limit=65536)
+            'X-Nextcloud-Talk-Bot-Random':nonce,'X-Nextcloud-Talk-Bot-Signature':signature},limit=65536,timeout=timeout)
 
     def enqueue_handoff(self,job,handoff):
         if handoff['source_room']!=job['room'] or handoff['source_thread']!=job['thread']:raise Denied('Wrong handoff source')
@@ -213,12 +220,15 @@ class Bridge(BaseBridge):
             if not notified and not ran:self.stop.wait(.5)
 
     def run_one(self):
-        with self.db() as db:
-            db.execute('BEGIN IMMEDIATE')
-            if db.execute("SELECT COUNT(*) FROM jobs WHERE status='running'").fetchone()[0]:return False
-            job=db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created LIMIT 1").fetchone()
-            if not job:return False
-            db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
+        with self.feedback_lock:
+            with self.db() as db:
+                db.execute('BEGIN IMMEDIATE')
+                if db.execute("SELECT COUNT(*) FROM jobs WHERE status='running'").fetchone()[0]:return False
+                job=db.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY created LIMIT 1").fetchone()
+                if not job:return False
+                db.execute("UPDATE jobs SET status='running' WHERE id=?",(job['id'],))
+                self.start_feedback(db,job)
+        self.feedback_wake.set()
         b=self.bindings[(job['uid'],job['room'])]
         try:
             awaiting_onboarding=False
@@ -230,7 +240,7 @@ class Bridge(BaseBridge):
                     _,result=json_request(b['runner_url']+'/execute',method='POST',headers={'Authorization':'Bearer '+b['runner_token']},
                         body={'uid':job['uid'],'room':job['room'],'thread':job['thread'],'job_id':job['id'],'kind':'status'},timeout=30)
                     self.queue_message(job,0,result['message'],job['message_id'])
-                    with self.db() as db:db.execute("UPDATE jobs SET status='done' WHERE id=?",(job['id'],))
+                    self.finish_job(job['id'],'done')
                     return True
                 projects=self.refresh(job['uid'])
                 message=INTRO+'\n\n项目：\n'+'\n'.join('• '+p['name'] for p in projects)+'\n\n发送「模型」或「/model」打开模型选择卡。\n也可使用「新项目 名称」「新任务 标题」手动组织。\n网盘：同意读取网盘／暂不授权／撤销网盘授权。\n附件：保存 编号／不保存 编号。\n项目修改：确认操作 编号。'
@@ -277,9 +287,9 @@ class Bridge(BaseBridge):
                 if job['parent_room']:
                     self.queue_message(job,1000,'项目任务有更新：\n'+(result.get('message') or '已返回成果，请到项目线程查看。')[:1500]+'\n项目：'+self.config['nextcloud_url']+'/call/'+job['room'],
                         thread=job['parent_thread'] or 0,room=job['parent_room'])
-            with self.db() as db:db.execute('UPDATE jobs SET status=? WHERE id=?',('awaiting_onboarding' if awaiting_onboarding else 'done',job['id']))
+            self.finish_job(job['id'],'awaiting_onboarding' if awaiting_onboarding else 'done')
         except Exception as exc:
-            with self.db() as db:db.execute("UPDATE jobs SET status='failed',error=? WHERE id=?",(type(exc).__name__,job['id']))
+            self.finish_job(job['id'],'failed',type(exc).__name__)
             try:self.queue_message(job,999,'任务未完成（'+job['id']+'）。未自动重试；可以继续说明需求或查看服务状态。',job['message_id'])
             except Exception:pass
             if job['parent_room']:
@@ -292,6 +302,7 @@ def main():
     cfg=json.loads(Path(os.environ.get('BRIDGE_CONFIG','/run/config/bridge.json')).read_text())
     bridge=Bridge(cfg,os.environ.get('BRIDGE_DATABASE','/state/jobs.sqlite'))
     for uid in bridge.users:bridge.refresh(uid)
+    threading.Thread(target=bridge.work_feedback,daemon=True).start()
     threading.Thread(target=bridge.work,daemon=True).start()
     Server(('0.0.0.0',8788),bridge).serve_forever()
 

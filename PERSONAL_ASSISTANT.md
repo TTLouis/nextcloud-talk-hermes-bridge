@@ -47,6 +47,25 @@ last request. In dedicated tasks they use the task's thread membership without
 quoting each individual message. Cards retain their exact operation/context
 binding in private state; a quoted reply is not used as authorization evidence.
 
+New task requests receive a signed bot 👀 reaction after durable enqueue.
+A separate lightweight feedback sender can report a queue wait after 15 seconds,
+the start of processing after 3 seconds, and continued processing every 180
+seconds while the same job remains running. Destinations come from the stored
+owner/project/thread, including the originating mirrored question card for a
+resumed answer. Text contains no task prompt or other user's queue details.
+Controls do not produce agent-running notices; onboarding waits are not
+described as running. Reaction attempts are bounded, text is attempted once per
+interval, and optional feedback failures do not retry the agent task.
+Finalization is serialized with bounded feedback sends so running notices cannot
+be emitted after the final result is released. Restarted in-flight jobs retain
+the existing interrupted/no-automatic-retry behavior.
+
+The main assistant keeps its continuous context and is instructed to act on
+relevant, already-authorized next steps, organize independent work through the
+existing handoff tools, and report useful next steps. The current request takes
+priority; unrelated previous work is not silently restarted. No `/new` reset,
+background monitoring, scheduled inference or broader API grants are added.
+
 ## Text model choices
 
 The initial per-user default is `gpt-6.1-sol`. The approved menu also offers
@@ -221,7 +240,7 @@ room: signed ingress still requires the stable UID and registered project, and
 connectors/delivery recheck the exact owner/helper participant set.
 
 Use `python -m unittest discover -s tests/secure -v` and the no-network disposable
-bridge-image test for 62 contracts. Actual endpoint tests cover native project
+bridge-image test for 76 contracts. Actual endpoint tests cover native project
 creation, rename, emoji/PNG avatar, assistant-authored thread attachment, correct
 owner download and negative permissions. A real task exercises MCP download,
 terminal calculation, text artifact delivery and process exit. A natural main
