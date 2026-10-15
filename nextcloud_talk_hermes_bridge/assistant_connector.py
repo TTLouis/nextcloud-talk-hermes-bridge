@@ -156,6 +156,23 @@ class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettin
     def delivery_request(self,*args,**kwargs):
         return json_request(*args,**kwargs)
 
+    def model_request(self,a,data,route,limit):
+        if route not in ('/v1/chat/completions','/v1/responses','/v1/images/generations'):
+            raise PermissionError('Unsupported model route')
+        if route=='/v1/images/generations':
+            if data.get('model')!=self.config['image_model']:raise PermissionError('Image model mismatch')
+        else:self.check_task_model(a,data)
+        raw,seq=self.model_envelope(a,data,route)
+        try:
+            result=request(self.config['model_url']+route[3:],method='POST',body=raw,timeout=240,limit=limit,
+                headers={'Content-Type':'application/json','Authorization':'Bearer '+self.config['model_token'],**self.model_headers(a['payload']['job_id'],seq)})
+            self.finish_model_audit(a['payload']['job_id'],seq,result[0])
+            return result
+        except urllib.error.HTTPError as exc:
+            self.finish_model_audit(a['payload']['job_id'],seq,exc.code);raise
+        except Exception:
+            self.finish_model_audit(a['payload']['job_id'],seq,0);raise
+
     def active_grant(self,bearer,count=False,model=False):
         with self.grant_lock:
             a=self.active
@@ -213,9 +230,8 @@ class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettin
             # Durable claim BEFORE provider request: no repeated billing on retries/restarts.
             claim=self.state/('image-'+p['job_id']+'.claimed')
             with claim.open('x') as handle:handle.write(p['job_id'])
-            _,response=json_request(self.config['model_url']+'/images/generations',method='POST',timeout=240,limit=40*1024*1024,
-                headers={'Authorization':'Bearer '+self.config['model_token']},
-                body={'model':self.config['image_model'],'prompt':prompt,'n':1,'size':'1024x1024'})
+            _,raw_response=self.model_request(a,{'model':self.config['image_model'],'prompt':prompt,'n':1,'size':'1024x1024'},'/v1/images/generations',40*1024*1024)
+            response=json.loads(raw_response)
             data=base64.b64decode(response['data'][0]['b64_json'],validate=True)
             if not data.startswith(b'\x89PNG\r\n\x1a\n') or len(data)>20*1024*1024:raise ValueError('Invalid image')
             dest='outputs/'+p['job_id']+'.png';write_workspace(self.workspace,self.work_relative(a,dest),data)
@@ -399,16 +415,7 @@ class Handler(BaseHandler):
             if self.path=='/tools':
                 self.reply(200,self.server.runner.tool(a,data['name'],data.get('arguments',{})));return
             # Fixed destination/routes/models; no arbitrary HTTP proxy and no provider key in worker.
-            self.server.runner.check_task_model(a,data)
-            raw,seq=self.server.runner.model_envelope(a,data,self.path)
-            try:
-                status,response=request(self.server.runner.config['model_url']+self.path[3:],method='POST',body=raw,timeout=240,limit=32*1024*1024,
-                    headers={'Content-Type':'application/json','Authorization':'Bearer '+self.server.runner.config['model_token']})
-                self.server.runner.finish_model_audit(a['payload']['job_id'],seq,status)
-            except urllib.error.HTTPError as exc:
-                self.server.runner.finish_model_audit(a['payload']['job_id'],seq,exc.code);raise
-            except Exception:
-                self.server.runner.finish_model_audit(a['payload']['job_id'],seq,0);raise
+            status,response=self.server.runner.model_request(a,data,self.path,32*1024*1024)
             self.send_response(200);self.send_header('Content-Type','text/event-stream' if data.get('stream') else 'application/json')
             self.send_header('Content-Length',str(len(response)));self.end_headers();self.wfile.write(response)
         except PermissionError as exc:self.reply(403,{'error':str(exc)[:200]})

@@ -113,11 +113,30 @@ approved models were checked through the existing gateway; no auxiliary model,
 new credential or remote image downloader is enabled. Model-request bodies are
 bounded at 16 MiB for image history; MCP tool bodies retain their 4 MiB limit.
 
-Each model call receives server-owned opaque project/context/task metadata and a
-local content-free audit receipt with route, model, time and HTTP status. Worker
-metadata cannot spoof another context; concurrent calls receive distinct audit
-sequence numbers. Visibility of metadata in a gateway's UI depends on that UI;
-the Connector audit remains authoritative for routing, not for permissions.
+Chat, Responses and image-generation calls carry Connector-owned UUID session
+headers derived from the user's exact conversation/thread. Project conversations
+reference the main assistant as their parent; task threads reference their
+project conversation. IDs stay stable across turns, model changes and renames,
+and differ across users. These observability IDs do not grant access to context.
+
+The source User-Agent includes bounded, readable user/conversation/task labels,
+room/thread IDs, job ID and call sequence. Chinese titles are preserved. The
+local audit records the same labels and IDs, route, actual model, time and HTTP
+status, without prompts, images, responses or credentials. Operators who can
+view gateway usage can see these conversation/task titles. Worker-supplied
+session aliases and metadata cannot replace the authorized identity.
+
+The installed CLIProxyAPI 8.0.10 usage queue was verified with its actual binary
+against a fixed mock provider in a network-disabled container: session headers,
+parent links and UTF-8 source labels are retained for chat and image generation.
+Custom `hermes_*` metadata alone is not a usage-dashboard grouping mechanism.
+The installed Usage Keeper 1.15.9 exposes these readable source labels in
+Request Events → Columns → User Agent. Hover or focus a truncated cell to
+see its full source label. Native Talk probes were also matched to actual Usage
+Keeper records and checked in the UI. Session IDs remain UUIDs. Existing
+historical audit rows are
+preserved, and missing historical labels are not invented. The Connector audit
+is attribution evidence, not an authorization boundary.
 
 Before an agent turn, the Connector injects at most six bounded handoff result
 receipts whose source exactly matches this owner/room/thread. It revalidates
