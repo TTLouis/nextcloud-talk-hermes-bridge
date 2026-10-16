@@ -92,7 +92,7 @@ class VisionContracts(unittest.TestCase):
             self.assertIsNotNone(self.c.prepare_talk_image(p,work))
 
     def test_omitted_webhook_thread_is_resolved_from_owned_native_message(self):
-        with mock.patch.object(self.c.nc,'ocs',return_value=[self.native]):
+        with mock.patch.object(self.c.nc,'ocs',side_effect=lambda url:{'thread':{'title':'预算任务'}} if '/threads/' in url else [self.native]):
             self.assertEqual(self.c.resolve_native_thread({**self.p,'thread':0}),12)
             with self.assertRaises(PermissionError):self.c.resolve_native_thread({**self.p,'thread':13})
         with mock.patch.object(self.c.nc,'ocs',return_value=[{**self.native,'actorId':'bob'}]):
@@ -104,6 +104,23 @@ class VisionContracts(unittest.TestCase):
             self.assertEqual(self.c.resolve_native_thread({**self.p,'thread':0}),0)
         with mock.patch.object(self.c.nc,'ocs',side_effect=[[root],{'thread':{'title':'预算任务'}}]):
             self.assertEqual(self.c.resolve_native_thread({**self.p,'thread':0}),20)
+
+    def test_ordinary_quoted_reply_stays_in_main_context_when_parent_is_not_a_task(self):
+        import urllib.error
+        quoted={**self.native,'threadId':12,'parent':{'id':12}}
+        def native(url):
+            if '/threads/' in url:raise urllib.error.HTTPError('synthetic',404,'No named thread',{},None)
+            return [quoted]
+        with mock.patch.object(self.c.nc,'ocs',side_effect=native):
+            self.assertEqual(self.c.resolve_native_thread({**self.p,'thread':0}),0)
+            self.assertEqual(self.c.resolve_native_thread(self.p),0)
+            with self.assertRaises(PermissionError):self.c.resolve_native_thread({**self.p,'thread':13})
+
+    def test_empty_model_sentinel_is_incomplete_even_when_process_exit_is_zero(self):
+        work=task_workspace(self.c.workspace,'alice','room123',12)
+        text="⚠️ No reply: gpt-6.1-sol didn't produce a reply this time, even after retries."
+        result=final_reply(self.c.workspace,work,self.p,{'text':text,'exit_code':0},0)
+        self.assertEqual(result['outcome'],'incomplete');self.assertIn('No reply',result['message'])
 
     def test_native_context_is_applied_before_worker_and_model_receipt(self):
         with mock.patch.object(self.c.nc,'room'),mock.patch.object(self.c.nc,'ocs',return_value={'thread':{'title':'预算任务'}}):

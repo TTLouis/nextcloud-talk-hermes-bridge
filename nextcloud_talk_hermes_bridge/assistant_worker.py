@@ -17,7 +17,7 @@ def final_reply(workspace,work,p,final,returncode):
     if not final or not isinstance(final.get('text'),str) or not final['text'].strip():
         if final and not returncode and not final.get('exit_code'):return {'message':'','outcome':'done'}
         raise RuntimeError('Hermes task failed; private diagnostics retained')
-    incomplete=bool(returncode or final.get('exit_code'))
+    incomplete=bool(returncode or final.get('exit_code') or final['text'].lstrip().startswith('⚠️ No reply:'))
     return {**worker_reply(workspace,work,p['job_id'],final['text']),'outcome':'incomplete' if incomplete else 'done'}
 
 class Worker:

@@ -47,15 +47,17 @@ class TalkImages:
         if m.get('actorType')!='users' or m.get('actorId')!=self.config['uid'] or m.get('token',p['room'])!=p['room']:
             raise PermissionError('Native input belongs to another user or room')
         actual=int(m.get('threadId',0))
-        if actual==mid:
-            try:info=self.nc.ocs('apps/spreed/api/v1/chat/'+p['room']+'/threads/'+str(mid))
+        native_thread=actual
+        if actual>0:
+            try:info=self.nc.ocs('apps/spreed/api/v1/chat/'+p['room']+'/threads/'+str(actual))
             except urllib.error.HTTPError as exc:
                 if exc.code not in (304,403,404):raise
                 info={}
-            # Standalone REST roots are self-labelled too. A titled native root
-            # starts a task; an ordinary root belongs to the coordinator.
-            if not (info.get('thread',{}).get('title') or info.get('thread',{}).get('name')):actual=0
-        if actual<0 or actual>=2**63 or p['thread'] not in (0,actual):raise PermissionError('Signed/native task mismatch')
+            # Ordinary quoted replies also carry their parent's ID. Only an
+            # actual named Talk thread creates a separate task context.
+            thread=info.get('thread',{}) if isinstance(info,dict) else {}
+            if not isinstance(thread,dict) or not (thread.get('title') or thread.get('name')):actual=0
+        if actual<0 or native_thread<0 or native_thread>=2**63 or p['thread'] not in (0,actual,native_thread):raise PermissionError('Signed/native task mismatch')
         return actual
 
     def prepare_talk_image(self, p, work):
