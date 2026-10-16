@@ -50,14 +50,30 @@ tokens for already-registered users. The normal tenant renderer preserves these
 network attachments during upgrades. Newly provisioned users do not inherit
 another user's browser token; enable browsing explicitly after provisioning.
 
-Assistant-drafted outbound queries require a bound owner choice. Exact URLs and
-search terms supplied in the current native user message can be used directly;
-model-authored handoffs are not implicit user authorization. Page contents and
-downloads cannot grant drive reads/saves or account controls. Authentication
-material is blocked from public requests. Existing image-request claims still
+Public operations use owner-bound conversation permissions: ask-first by default,
+automatic after project approval, blocked, or strict per-request review.
+`/设置` manages these and the owner's future-project default; defaults are copied
+at creation and do not change existing projects. Main auto approval is separate.
+Legacy pending approvals stay one-off. Project-setting changes invalidate old
+pending/unexecuted grants. Settings are Bridge controls, not model tools; user
+IDs, rooms, threads and replay state are checked before any change. Strict mode
+retains exact native query/URL and observed-source rules. Public text and model
+handoffs cannot grant permissions. Authentication material remains blocked;
+drive reads and saving require independent owner choices. Existing image-request claims still
 prevent duplicate billing; jobs and image-generation requests are not replayed.
 A confirmed empty chat completion can reserve one extra non-streaming attempt
 using the same selected model, context and tool permissions. This requires the
 original active, unexpired task grant and counts against its model budget.
 Persisted reservations prevent another recovery after restart. Other provider
 errors, refusals and reasoning/tool responses do not trigger this recovery.
+
+
+## Settings schema and downgrades
+
+This release adds separate owner setting tables and two approval metadata
+columns to `web_requests`. Existing rows keep their exact one-off scope. A
+downgrade to older releases using seven-value positional inserts into that
+table requires a deliberate schema migration; changing image pins alone is
+insufficient. Retire newer pending setting/project cards and take a fresh
+private database backup before a downgrade. Preserve current user choices,
+saved files and history; do not restore a stale database over later user work.

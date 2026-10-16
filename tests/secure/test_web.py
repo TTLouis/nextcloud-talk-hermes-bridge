@@ -17,6 +17,9 @@ class PublicWebTests(unittest.TestCase):
             'chat_model':'gpt-6.1-sol','delivery_url':'http://delivery','delivery_token':'synthetic-delivery',
             'browser_url':'http://browser','browser_token':'synthetic-browser'}
         self.c=Connector(self.cfg,root/'control',root/'workspace')
+        # Retain the original per-request mode contracts; project-level defaults
+        # and one-time project consent are exercised separately.
+        with self.c.db() as db:self.c.set_web_permission(db,'room123','strict')
         self.p={'uid':'alice','room':'room123','thread':12,'job_id':'a'*12,'task_root':'a'*12,'prompt':'research','native_input':True}
         self.a={'payload':self.p,'questions':[],'work':task_workspace(self.c.workspace,'alice','room123',12)}
         self.response={'url':'https://example.com/','title':'Example','text':'public source','links':[{'title':'Paper','url':'https://example.com/paper.pdf'}]}

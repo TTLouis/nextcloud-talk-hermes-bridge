@@ -1,4 +1,4 @@
-"""Task-owned public research; private-context outbound text needs an owner choice."""
+"""Task-owned public research under explicit owner project permissions."""
 import base64
 import hashlib
 import json
@@ -9,9 +9,13 @@ from urllib.parse import urlsplit,urlunsplit,unquote,quote
 from .secure_common import json_request
 from .assistant_context import write_workspace,read_workspace
 from .assistant_outputs import readable_filename
+from .assistant_settings import AssistantSettings
 
 ALLOW='允许这一次请求'
 DENY='不发送'
+PROJECT_ALLOW='允许本对话联网，以后不再问'
+PROJECT_DENY='禁止本对话联网'
+MAIN_AUTO='主对话与新项目默认自动批准'
 
 def public_url(value):
     if not isinstance(value,str) or not 0<len(value)<=1600 or re.search(r'[\x00-\x20]',value):raise ValueError('Invalid public URL')
@@ -19,7 +23,7 @@ def public_url(value):
     if u.scheme not in ('http','https') or not u.hostname or u.username or u.password or u.port not in (None,80,443):raise ValueError('Unsupported public URL')
     return urlunsplit((u.scheme,u.netloc,u.path or '/',u.query,''))
 
-class PublicWeb:
+class PublicWeb(AssistantSettings):
     def init_web(self):
         with self.db() as db:
             db.execute('CREATE TABLE IF NOT EXISTS web_context (room TEXT,thread INTEGER,private INTEGER NOT NULL,PRIMARY KEY(room,thread))')
@@ -28,6 +32,10 @@ class PublicWeb:
             db.execute('INSERT OR IGNORE INTO web_context SELECT room,thread,1 FROM task_state')
             db.execute('CREATE TABLE IF NOT EXISTS web_sources (root_job TEXT,room TEXT,thread INTEGER,url TEXT,title TEXT,created REAL,PRIMARY KEY(root_job,room,thread,url))')
             db.execute('CREATE TABLE IF NOT EXISTS web_requests (id TEXT PRIMARY KEY,root_job TEXT,room TEXT,thread INTEGER,request TEXT,status TEXT,response TEXT)')
+            columns={r['name'] for r in db.execute('PRAGMA table_info(web_requests)')}
+            if 'approval_scope' not in columns:db.execute("ALTER TABLE web_requests ADD COLUMN approval_scope TEXT NOT NULL DEFAULT 'once'")
+            if 'policy_revision' not in columns:db.execute('ALTER TABLE web_requests ADD COLUMN policy_revision INTEGER NOT NULL DEFAULT 0')
+        self.init_settings()
 
     def private_web_context(self,p):
         with self.db() as db:r=db.execute('SELECT private FROM web_context WHERE room=? AND thread=?',(p['room'],p['thread'])).fetchone()
@@ -41,13 +49,23 @@ class PublicWeb:
         with self.db() as db:
             r=db.execute('SELECT * FROM web_requests WHERE id=? AND room=? AND thread=?',(q['id'],p['room'],p['thread'])).fetchone()
             if r:
-                if r['status']!='pending' or p['decision'] not in (ALLOW,DENY):raise PermissionError('Invalid outbound approval')
-                db.execute('UPDATE web_requests SET status=? WHERE id=?',('allowed' if p['decision']==ALLOW else 'denied',r['id']))
+                decision=p['decision'];options=(ALLOW,DENY) if r['approval_scope']=='once' else (PROJECT_ALLOW,PROJECT_DENY,ALLOW,DENY,MAIN_AUTO)
+                if r['status']!='pending' or decision not in options:raise PermissionError('Invalid outbound approval')
+                policy=db.execute('SELECT mode,revision FROM web_permissions WHERE uid=? AND room=?',(self.config['uid'],p['room'])).fetchone()
+                if not policy or policy['mode']=='deny' or (r['policy_revision'] and policy['revision']!=r['policy_revision']):raise PermissionError('Outdated outbound approval')
+                if decision==MAIN_AUTO and p['room']!=self.config['room']:raise PermissionError('Main-only web default choice')
+                if decision in (PROJECT_ALLOW,PROJECT_DENY,MAIN_AUTO):
+                    self.set_web_permission(db,p['room'],'deny' if decision==PROJECT_DENY else 'auto',r['id'])
+                if decision==MAIN_AUTO:
+                    db.execute('UPDATE web_preferences SET new_project_mode=?,updated=? WHERE uid=?',('auto',time.time(),self.config['uid']))
+                db.execute('UPDATE web_requests SET status=? WHERE id=?',('denied' if decision in (DENY,PROJECT_DENY) else 'allowed',r['id']))
 
     def web_tool(self,a,name,args):
         if not self.config.get('browser_url') or not self.config.get('browser_token'):raise PermissionError('Public browser is not configured')
         p=a['payload'];root=p.get('task_root',p['job_id'])
         if p.get('uid')!=self.config['uid']:raise PermissionError('Foreign public task owner')
+        mode,revision=self.web_policy(p['room'])
+        if mode=='deny':raise PermissionError('This project does not allow public networking; only its owner can change /设置')
         operation={'web_search':'search','web_read':'read','web_download':'download'}[name]
         request={'operation':operation}
         if operation=='search':
@@ -67,8 +85,8 @@ class PublicWeb:
             with self.db() as db:
                 source=db.execute('SELECT 1 FROM web_sources WHERE root_job=? AND room=? AND thread=? AND url=? AND created>?',
                     (root,p['room'],p['thread'],request['url'],time.time()-3600)).fetchone()
-            # The model cannot invent a URL containing private text. Follow exact
-            # observed public links or exact URLs supplied in the current user turn.
+            # Strict mode follows exact observed public links or URLs supplied
+            # in the current user turn. Broader project consent is checked below.
             needs_choice=request['url'] not in direct and source is None
         encoded=json.dumps(request,sort_keys=True,ensure_ascii=False)
         # Browsing must never disclose an authentication capability, even if a
@@ -83,17 +101,28 @@ class PublicWeb:
         with self.db() as db:old=db.execute('SELECT * FROM web_requests WHERE id=?',(ident,)).fetchone()
         if old and (old['root_job'],old['room'],old['thread'],old['request'])!=(root,p['room'],p['thread'],encoded):raise PermissionError('Foreign public request')
         if old and old['status']=='done':return json.loads(old['response'])
-        if old and old['status'] in ('denied','started','failed'):raise PermissionError('Public request denied or already attempted; not automatically replayed')
+        if old and old['status'] in ('denied','started','failed','cancelled'):raise PermissionError('Public request denied or already attempted; not automatically replayed')
+        with self.db() as db:
+            denied=db.execute("SELECT 1 FROM web_requests WHERE root_job=? AND room=? AND thread=? AND status='denied'",(root,p['room'],p['thread'])).fetchone()
+        if denied:raise PermissionError('The owner declined an outbound request; do not reword it to ask again in this task')
+        # Project grants cover all its tasks. Exact legacy one-off approvals stay
+        # one-off; migration never silently expands them into project grants.
+        needs_choice=mode=='ask' or (mode=='strict' and needs_choice)
         if needs_choice and (not old or old['status']=='pending'):
-            with self.db() as db:
-                denied=db.execute("SELECT 1 FROM web_requests WHERE root_job=? AND room=? AND thread=? AND status='denied'",(root,p['room'],p['thread'])).fetchone()
-            if denied:raise PermissionError('The owner declined an outbound request; do not reword it to ask again in this task')
             displayed=re.sub(r'[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]',lambda m:'\\u'+format(ord(m[0]),'04x'),request.get('query',request.get('url','')))
-            fence='`'*max(3,1+max((len(v) for v in re.findall(r'`+',displayed)),default=0))
+            title=next(r['name'] for r in self.projects() if r['room']==p['room'])
+            title=re.sub(r'[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]',lambda m:'\\u'+format(ord(m[0]),'04x'),title)
+            fence='`'*max(3,1+max((len(v) for v in re.findall(r'`+',title+'\n'+displayed)),default=0))
             question='是否向公网发送助手拟定的以下'+('搜索词' if operation=='search' else '网址')+'？\n'+fence+'text\n'+displayed+'\n'+fence+'\n请勿允许发送令牌、私有文件或完整对话。只授权这一次请求，不授予网盘读取或保存权限。'
             options=[ALLOW,DENY]
+            scope='once'
+            if mode=='ask':
+                scope='project'
+                subject='主对话' if p['room']==self.config['room'] else '项目'
+                question='首次联网：是否允许以下'+subject+'进行公开搜索、阅读和资料下载？许可适用于本对话全部任务。\n'+fence+'text\n对话：'+title+'\n首次请求：'+displayed+'\n'+fence+'\n允许后可自动发送助手拟定的搜索词和公网网址，不再逐项询问；凭据和内网仍被拦截，网盘读取及保存另需授权。可随时通过 /设置 修改。'
+                options=[PROJECT_ALLOW,ALLOW,PROJECT_DENY,DENY]+([MAIN_AUTO] if p['room']==self.config['room'] else [])
             with self.db() as db:
-                db.execute('INSERT OR IGNORE INTO web_requests VALUES (?,?,?,?,?,?,NULL)',(ident,root,p['room'],p['thread'],encoded,'pending'))
+                db.execute('INSERT OR IGNORE INTO web_requests (id,root_job,room,thread,request,status,approval_scope,policy_revision) VALUES (?,?,?,?,?,?,?,?)',(ident,root,p['room'],p['thread'],encoded,'pending',scope,revision))
                 db.execute('INSERT OR IGNORE INTO questions VALUES (?,?,?,?,?,?,?)',(ident,p['room'],p['thread'],question,json.dumps(options),'pending',None))
                 db.execute('INSERT OR IGNORE INTO question_models VALUES (?,?)',(ident,p['job_id']))
             choice={'id':ident,'question':question,'options':options}
@@ -104,7 +133,7 @@ class PublicWeb:
         with self.db() as db:
             count=db.execute("SELECT COUNT(*) FROM web_requests WHERE root_job=? AND status IN ('started','done','failed')",(root,)).fetchone()[0]
             if count>=8:raise ValueError('Public research request budget exceeded')
-            db.execute('INSERT OR IGNORE INTO web_requests VALUES (?,?,?,?,?,?,NULL)',(ident,root,p['room'],p['thread'],encoded,'allowed'))
+            db.execute('INSERT OR IGNORE INTO web_requests (id,root_job,room,thread,request,status) VALUES (?,?,?,?,?,?)',(ident,root,p['room'],p['thread'],encoded,'allowed'))
             db.execute("UPDATE web_requests SET status='started' WHERE id=?",(ident,))
         try:
             _,result=json_request(self.config['browser_url']+'/web',method='POST',timeout=85,limit=29*1024*1024,

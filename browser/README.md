@@ -16,21 +16,32 @@ a source it has found. It returns source links and can deliver downloaded files
 through the existing `present_file` attachment flow. Formal cloud saving still
 requires your separate confirmation.
 
-Assistant-drafted searches first show the exact outgoing query as a reaction
-choice, including in new tasks. Choose whether to send it. The approval
-is bound to that exact request and task; the model cannot approve it itself.
-An exact query you provide as `搜索：your query` or `search: your query` can run
-directly. This is optional; ordinary requests use the choice card. Authentication
-material is blocked outright, including common URL/base64 encodings, and an owner
-refusal prevents rewording the request to keep asking during that task.
+The default is one owner choice when a project first needs the public web.
+The card shows its conversation name and first outgoing query/URL. Allow the
+whole conversation (including all task threads), allow only this request,
+block the conversation, or decline this request. Project approval permits
+subsequent assistant-drafted public queries/URLs without repeated prompts.
 
-The assistant can follow exact public links returned by its web tools or URLs
-in your current native Talk message. A model-created URL containing additional
-text requires a separate choice. Model-authored handoffs do not count as a
-user-provided URL. This prevents silently appending private text to outgoing
-URLs after reading an injected page. It is not a proof that an LLM will never
-follow misleading information; factual reliability and prompt injection remain
-separate concerns.
+Send `/设置` or `/settings` to change web permission: ask-first, automatic
+approval, blocked, or strict per-request review. The main conversation can be
+set to automatic approval independently. Its first-use card also offers an
+explicit combined main-plus-future-project default; this does not change other
+existing projects. Each new project snapshots its owner's current default.
+Permissions and defaults persist in the owner's isolated Connector database.
+
+In strict mode, assistant-drafted queries and unobserved URLs require an exact
+request choice; exact `搜索：...` / `search: ...`, native user URLs and observed
+same-task public sources retain the prior direct-use behavior. Model-authored
+handoffs are never native user URLs. Existing pending approvals migrate as
+one-off approvals, without silently granting a whole project. Changing a project
+setting invalidates its old pending and unexecuted grants across task threads.
+
+All modes retain credential blocking (including common URL/base64 encodings),
+public-only egress and operation/download limits. Auto approval permits the
+assistant to draft outgoing queries/URLs; it removes their individual human
+review. The assistant remains instructed not to send private files or full
+conversations, and public pages remain untrusted data. Approval is never cloud
+read/write or save consent, and a model tool or page cannot modify settings.
 
 ## Boundaries
 

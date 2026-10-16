@@ -180,6 +180,42 @@ mobile-detail flow, task state and parent notification identify it as unfinished
 and the billable task is not retried automatically. Empty failures still fail
 closed with the existing generic error notice.
 
+## Settings and project web permission
+
+`/设置`, `设置` and `/settings` open deterministic owner-bound reaction cards.
+The menu contains existing default/next-task model controls, current-conversation
+web permission, the personal default for future projects, and drive read consent.
+Settings do not invoke Hermes, consume a model override, reset context, or
+change provider credentials/API scopes. Drive choices preserve first-use
+onboarding; declining or allowing completes setup, and revocation uses the
+existing immediate owner-only route while a model task runs.
+
+Each project starts in ask-first mode unless its owner explicitly changed the
+future-project default. Its first web operation, including a native user URL,
+shows the project name, first request and permission scope. The owner can grant
+automatic public research for all task threads in that conversation, grant one
+request, block the conversation, or decline. Main permission is separate; its
+card additionally offers an explicit main-plus-future-project auto default.
+Defaults are copied at project creation and never applied retroactively to
+existing projects or another user. Existing users start with ask-first project
+permissions; old pending request approvals remain one-off approvals.
+
+Other settings modes are automatic, blocked and strict per-request review.
+Strict retains the exact-query/native-URL/source rules described in the browser
+guide. The host decides whether a tool needs a choice; the model is instructed
+to call web tools directly instead of repeatedly asking through `ask_user`.
+Project permission persists across new tasks and restarts. A project-setting
+change increments its revision and invalidates old pending/unexecuted web
+grants in every thread. Cards bind UID/room/thread, reject replay and supersede
+older settings panels. Only authenticated Bridge controls can change settings;
+they are absent from MCP. Ordinary assistant choice labels grant nothing.
+
+Automatic approval removes review of individual drafted public queries and URLs.
+It retains credential blocking, the existing public-only proxy, read-only web
+operations, task scratch isolation and budgets. Public text is still untrusted
+and cannot change any permission. Cloud reads and formal saving remain separate.
+Queued settings take effect in order; opening a menu alone changes no permission.
+
 ## Text model choices
 
 The initial per-user default is `gpt-6.1-sol`. The approved menu also offers
@@ -211,6 +247,8 @@ Optional Talk commands:
   and registered bot. Unknown rooms remain denied by the Bridge.
 - `新任务 标题`: create a real named task thread. Enter that thread to continue.
 - `项目列表`, `任务列表`, `帮助`: deterministic navigation without a model call.
+- `/设置` or `/settings`: models, current web permission, future-project defaults
+  and drive read consent, without a model request.
 - `模型` or `/model`: personal-default and next-task model choice cards, without
   an inference request.
 - `同意读取网盘`, `暂不授权`, `撤销网盘授权`: explicit user-owned read consent.
@@ -237,8 +275,9 @@ Its MCP facade provides `nextcloud_list`, `nextcloud_read_text`,
 `nextcloud_download`, `assistant_projects`, `handoff_project`, `project_tasks`,
 `ask_user`, `generate_image`, `present_file`, `propose_project_change`,
 `web_search`, `web_read` and `web_download` when the optional public browser is
-configured. See [public research boundaries](browser/README.md) for exact-query
-choices, source provenance, download limits and Docker setup.
+configured. See [public research boundaries](browser/README.md) for project
+permission, strict exact-query choices, source provenance, download limits and
+Docker setup.
 Cloud files are read through the bound user's native
 Nextcloud API behind MCP; native ACLs continue to apply. The model cannot select
 another UID, another credential or a different destination server.
@@ -357,7 +396,7 @@ room: signed ingress still requires the stable UID and registered project, and
 connectors/delivery recheck the exact owner/helper participant set.
 
 Use `python -m unittest discover -s tests/secure -v` and the no-network disposable
-bridge-image test for 161 contracts. Actual endpoint tests cover native project
+bridge-image test for 177 contracts. Actual endpoint tests cover native project
 creation, rename, emoji/PNG avatar, assistant-authored thread attachment, correct
 owner download and negative permissions. A real task exercises MCP download,
 terminal calculation, text artifact delivery and process exit. A natural main

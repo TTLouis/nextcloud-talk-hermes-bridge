@@ -117,6 +117,7 @@ class Bridge(TaskFeedback,BaseBridge):
             kind='create_project';prompt=message[4:].strip()
         elif message in ('项目列表','任务列表','帮助','使用指南','重新介绍'):kind='help'
         elif message in ('模型','模型设置','切换模型','/model'):kind='model_menu'
+        elif message in ('设置','/设置','/settings'):kind='settings_menu'
         else:
             match=re.fullmatch(r'(保存|不保存|确认操作)\s+([a-f0-9]{12})',message)
             if match:kind={'保存':'save','不保存':'discard','确认操作':'confirm'}[match[1]];artifact=match[2]
@@ -151,7 +152,7 @@ class Bridge(TaskFeedback,BaseBridge):
             db.execute("UPDATE choices SET status='selected' WHERE room=? AND message_id=?",(c['room'],c['message_id']))
             self.add_feedback(db,jobid,decision['kind'])
         self.feedback_wake.set()
-        if decision['kind']=='consent' and decision.get('decision')=='deny':
+        if (decision['kind']=='consent' and decision.get('decision')=='deny') or (decision['kind']=='settings_select' and decision.get('decision')=='drive_deny'):
             b=self.bindings[(uid,room)]
             json_request(b['runner_url']+'/consent',method='POST',timeout=15,headers={'Authorization':'Bearer '+b['runner_token']},
                 body={'uid':uid,'room':room,'thread':thread,'job_id':jobid,'decision':'deny'})
@@ -182,8 +183,8 @@ class Bridge(TaskFeedback,BaseBridge):
         data={'uid':job['uid'],'execution_room':job['room'],'execution_thread':job['thread'],'options':options,'group':group}
         with self.db() as db:db.execute('UPDATE notifications SET choice=? WHERE id=?',(json.dumps(data),job['id']+'-'+str(sequence)))
 
-    def queue_model_card(self,job,sequence,card):
-        group='models:'+job['room']+':'+str(job['thread'])
+    def queue_model_card(self,job,sequence,card,prefix='models'):
+        group=prefix+':'+job['room']+':'+str(job['thread'])
         with self.db() as db:
             db.execute("UPDATE choices SET status='resolved' WHERE uid=? AND choice_group=? AND status='pending'",(job['uid'],group))
             for row in db.execute("SELECT id,choice FROM notifications WHERE status='pending' AND choice IS NOT NULL").fetchall():
@@ -272,7 +273,7 @@ class Bridge(TaskFeedback,BaseBridge):
                     self.finish_job(job['id'],'done')
                     return True
                 projects=self.refresh(job['uid'])
-                message=INTRO+'\n\n项目：\n'+'\n'.join('• '+p['name'] for p in projects)+'\n\n发送「模型」或「/model」打开模型选择卡。\n也可使用「新项目 名称」「新任务 标题」手动组织。\n网盘：同意读取网盘／暂不授权／撤销网盘授权。\n附件：保存 编号／不保存 编号。\n项目修改：确认操作 编号。'
+                message=INTRO+'\n\n项目：\n'+'\n'.join('• '+p['name'] for p in projects)+'\n\n发送「/设置」调整模型、当前对话联网和新项目默认许可；「/model」仍可直接切换模型。\n也可使用「新项目 名称」「新任务 标题」手动组织。\n网盘：同意读取网盘／暂不授权／撤销网盘授权。\n附件：保存 编号／不保存 编号。\n项目修改：确认操作 编号。'
                 self.queue_message(job,0,message,job['message_id']);result={}
             else:
                 _,result=json_request(b['runner_url']+'/execute',method='POST',headers={'Authorization':'Bearer '+b['runner_token']},
@@ -288,13 +289,15 @@ class Bridge(TaskFeedback,BaseBridge):
                         db.execute('UPDATE jobs SET thread=? WHERE id=?',(actual,job['id']))
                         job=db.execute('SELECT * FROM jobs WHERE id=?',(job['id'],)).fetchone()
                 if result.get('new_project'):self.refresh(job['uid'])
-                if job['kind']=='consent' and result.get('onboarding_complete') is True:
+                if result.get('onboarding_complete') is True:
                     if self.release_onboarding(job['uid']):result['message']+='\n我会按顺序继续你刚才的请求。'
                 text=result.get('message','')
                 if result.get('outcome')=='incomplete':text='这项任务尚未完成；以下是当前进度和阻塞说明。\n\n'+text
                 sequence=0
                 if result.get('model_card'):
                     self.queue_model_card(job,sequence,result['model_card']);sequence+=1
+                if result.get('settings_card'):
+                    self.queue_model_card(job,sequence,result['settings_card'],'settings');sequence+=1
                 if result.get('requires_consent'):
                     awaiting_onboarding=True
                     if not self.has_pending_consent(job['uid']):self.queue_choice(job,-1,text,{'✅':{'kind':'consent','decision':'allow'},'❌':{'kind':'consent','decision':'deny'}},'consent')

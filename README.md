@@ -52,6 +52,11 @@ conversation appear as standalone messages. The main assistant keeps its
 continuous context, follows relevant agreed next steps, and can organize
 independent work without requiring a context-reset command.
 
+Send **`/设置`** (or `/settings`) to change your default or next-task model,
+this conversation's web permission, your default for future projects, or drive
+read consent. In the main conversation, web permission includes an automatic
+approval option. Settings use reaction cards and do not make a model call.
+
 When a decision is needed, tap the reaction shown below the question: **✅ / ❌**
 for a yes/no choice, or **1️⃣–5️⃣** for multiple options. Each card is bound to its
 own task and can only be answered by its owner.
@@ -81,10 +86,18 @@ text file or image. Results include source links; downloads first stay in the
 task's private Docker scratchpad. Delivering an attachment and saving it to your
 drive remain separate steps.
 
-Assistant-drafted searches show the exact outgoing query as a reaction choice.
-The assistant can follow links it has found, but cannot silently construct a
-new URL containing private text. Browsing uses isolated Playwright CLI sessions
-and a public-only network proxy. See [web research and Docker setup](browser/README.md).
+A project's first web request asks once for permission. Choose to allow public
+research for the whole conversation (including its task threads), allow just
+that request, or decline. After project approval, searches, reading and public
+downloads no longer need individual confirmations. The main conversation has
+its own setting; approving it alone does not approve your other projects.
+
+Use `/设置` to select ask-first, automatic approval, blocked web access, or
+stricter per-request review. Your new-project default applies only to projects
+you create afterward. It never changes a family member's settings. Drive reads
+and formal saves keep their separate authorization. Browsing still uses isolated
+Playwright CLI sessions and a public-only network proxy that blocks internal
+addresses and credentials. See [web research and Docker setup](browser/README.md).
 
 ## Reading replies on a phone
 

@@ -91,6 +91,8 @@ class Connector(PublicWeb,TalkImages,Coordination,ReplyDetails,ReadableOutputs,M
         try:
             kind=p['kind']
             is_answer=kind=='answer';question_origin=None
+            if kind=='settings_menu':return self.settings_menu(p)
+            if kind=='settings_select':return self.settings_decision(p)
             if kind=='model_menu':return self.model_menu(p)
             if kind in ('model_scope','model_select'):return self.model_decision(p)
             if kind=='answer':
@@ -397,6 +399,7 @@ class Connector(PublicWeb,TalkImages,Coordination,ReplyDetails,ReadableOutputs,M
             self.nc.ocs('apps/spreed/api/v4/room/'+token+'/participants',{'newParticipant':self.config['assistant_uid'],'source':'users'},'POST')
             self.nc.ocs('apps/spreed/api/v1/bot/'+token+'/'+str(self.config['bot_id']),{},'POST')
             with self.db() as db:db.execute('INSERT INTO projects VALUES (?,?)',(token,title))
+            self.seed_web_project(token)
             _,_=json_request(self.config['delivery_url']+'/bind',method='POST',headers={'Authorization':'Bearer '+self.config['delivery_token']},
                 body={'room':token},timeout=30)
             return {'message':'独立对话「'+title+'」已建立。可以直接说需求，主助理也可把任务交接到这里。','new_project':token}
