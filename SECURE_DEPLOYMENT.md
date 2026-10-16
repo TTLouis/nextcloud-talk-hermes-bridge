@@ -55,4 +55,9 @@ search terms supplied in the current native user message can be used directly;
 model-authored handoffs are not implicit user authorization. Page contents and
 downloads cannot grant drive reads/saves or account controls. Authentication
 material is blocked from public requests. Existing image-request claims still
-prevent duplicate billing; no model-empty result is automatically retried.
+prevent duplicate billing; jobs and image-generation requests are not replayed.
+A confirmed empty chat completion can reserve one extra non-streaming attempt
+using the same selected model, context and tool permissions. This requires the
+original active, unexpired task grant and counts against its model budget.
+Persisted reservations prevent another recovery after restart. Other provider
+errors, refusals and reasoning/tool responses do not trigger this recovery.

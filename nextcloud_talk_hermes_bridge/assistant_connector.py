@@ -28,6 +28,7 @@ from .assistant_replies import ReplyDetails
 from .assistant_vision import TalkImages
 from .assistant_coordination import Coordination
 from .assistant_web import PublicWeb
+from .assistant_response import response_shape,empty_completion,recovery_request,as_stream
 
 class Connector(PublicWeb,TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettings):
     def __init__(self,config,state,workspace):
@@ -159,7 +160,7 @@ class Connector(PublicWeb,TalkImages,Coordination,ReplyDetails,ReadableOutputs,M
     def delivery_request(self,*args,**kwargs):
         return json_request(*args,**kwargs)
 
-    def model_request(self,a,data,route,limit):
+    def model_request(self,a,data,route,limit,*,recover=True):
         if route not in ('/v1/chat/completions','/v1/responses','/v1/images/generations'):
             raise PermissionError('Unsupported model route')
         if route=='/v1/images/generations':
@@ -170,6 +171,33 @@ class Connector(PublicWeb,TalkImages,Coordination,ReplyDetails,ReadableOutputs,M
             result=request(self.config['model_url']+route[3:],method='POST',body=raw,timeout=240,limit=limit,
                 headers={'Content-Type':'application/json','Authorization':'Bearer '+self.config['model_token'],**self.model_headers(a['payload']['job_id'],seq)})
             self.finish_model_audit(a['payload']['job_id'],seq,result[0])
+            if route=='/v1/chat/completions':
+                shape=response_shape(result[1],data)
+                with self.db() as db:
+                    db.execute('CREATE TABLE IF NOT EXISTS model_response_audit (job TEXT,seq INTEGER,shape TEXT,PRIMARY KEY(job,seq))')
+                    db.execute('INSERT OR REPLACE INTO model_response_audit VALUES (?,?,?)',(a['payload']['job_id'],seq,json.dumps(shape)))
+                if recover and isinstance(data.get('messages'),list) and empty_completion(result[1]):
+                    # One recovery per job, durably reserved before another billed
+                    # completion. Never replay an image request or a whole task.
+                    with self.db() as db:
+                        db.execute('CREATE TABLE IF NOT EXISTS model_recoveries (job TEXT PRIMARY KEY,original_seq INTEGER,status TEXT)')
+                        reserved=db.execute('INSERT OR IGNORE INTO model_recoveries VALUES (?,?,?)',(a['payload']['job_id'],seq,'reserved')).rowcount
+                    if reserved:
+                        try:
+                            with self.grant_lock:
+                                if 'expires' in a and (self.active is not a or time.monotonic()>a['expires']):
+                                    raise PermissionError('Expired or inactive task grant')
+                                a['models']=a.get('models',0)+1
+                                if a['models']>32:raise ValueError('Model request budget exceeded')
+                            recovered=self.model_request(a,recovery_request(data),route,limit,recover=False)
+                            if empty_completion(recovered[1]):state='empty'
+                            else:
+                                result=(recovered[0],as_stream(recovered[1]) if data.get('stream') else recovered[1]);state='recovered'
+                        except Exception:
+                            # Keep the provider's original empty reply; Hermes can
+                            # surface its incomplete outcome, never a fake success.
+                            state='failed'
+                        with self.db() as db:db.execute('UPDATE model_recoveries SET status=? WHERE job=?',(state,a['payload']['job_id']))
             return result
         except urllib.error.HTTPError as exc:
             self.finish_model_audit(a['payload']['job_id'],seq,exc.code);raise

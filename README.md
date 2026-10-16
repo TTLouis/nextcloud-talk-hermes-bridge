@@ -66,6 +66,11 @@ marker in that uncommon case. Status updates do not call a model or reveal
 another user's tasks. They use the existing non-admin delivery account;
 the agent receives no additional permissions.
 
+A blank model reply can trigger one extra recovery attempt with your selected
+model. This continues the current request; it does not restart a job or repeat
+an image-generation request. If the assistant still cannot finish, it reports
+the task as incomplete.
+
 The current welcome messages and control commands are in Chinese. You can write
 ordinary requests in the language supported by your chosen model.
 

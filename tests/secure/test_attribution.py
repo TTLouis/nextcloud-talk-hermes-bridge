@@ -4,6 +4,7 @@ from pathlib import Path
 import sqlite3
 import struct
 import tempfile
+import time
 import unittest
 import urllib.error
 import uuid
@@ -121,6 +122,66 @@ class AttributionContracts(unittest.TestCase):
             for route,model in [('/v1/arbitrary','gpt-6.1-sol'),('/v1/images/generations','forged')]:
                 with self.assertRaises(PermissionError):self.c.model_request({'payload':self.p},{'model':model},route,100)
             req.assert_not_called()
+
+    def test_empty_stream_recovers_same_model_with_function_call_and_same_authority(self):
+        from nextcloud_talk_hermes_bridge.assistant_response import as_stream
+        empty=json.dumps({'choices':[{'message':{'content':None},'finish_reason':'stop'}]}).encode()
+        recovered=json.dumps({'id':'chatcmpl-test','model':'gpt-6.1-sol','choices':[{'message':{'role':'assistant','content':None,
+            'tool_calls':[{'id':'call-1','type':'function','function':{'name':'tool_describe','arguments':'{}'}}]},'finish_reason':'tool_calls'}]}).encode()
+        data={'model':'gpt-6.1-sol','stream':True,'messages':[{'role':'user','content':'生成图片'}],'tools':[{'function':{'name':'tool_describe'}}]}
+        active={'payload':self.p,'models':1,'expires':time.monotonic()+60};self.c.active=active
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.request',side_effect=[(200,as_stream(empty)),(200,recovered)]) as req:
+            status,raw=self.c.model_request(active,data,'/v1/chat/completions',100000)
+        self.assertEqual(status,200);self.assertEqual(req.call_count,2);self.assertIn(b'call-1',raw)
+        first,second=[json.loads(c.kwargs['body']) for c in req.call_args_list]
+        self.assertFalse(second['stream']);self.assertEqual(second['model'],first['model'])
+        self.assertEqual(second['messages'][:-1],first['messages']);self.assertEqual(second['tools'],first['tools'])
+        self.assertEqual(first['metadata'],second['metadata'])
+        for c in req.call_args_list:self.assertEqual(c.kwargs['headers']['Authorization'],'Bearer provider-secret')
+        with self.c.db() as db:
+            self.assertEqual(db.execute('SELECT status FROM model_recoveries').fetchone()[0],'recovered')
+            rows=db.execute('SELECT shape FROM model_response_audit ORDER BY seq').fetchall()
+        self.assertEqual(len(rows),2);self.assertNotIn('生成图片',str(rows));self.assertEqual(active['models'],2)
+
+    def test_empty_recovery_reservation_survives_connector_restart_and_never_loops(self):
+        empty=json.dumps({'choices':[{'message':{'content':None},'finish_reason':'stop'}]}).encode()
+        data={'model':'gpt-6.1-sol','messages':[{'role':'user','content':'task'}]}
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.request',return_value=(200,empty)) as req:
+            self.assertEqual(self.c.model_request({'payload':self.p},data,'/v1/chat/completions',10000),(200,empty))
+            restarted=Connector(self.cfg,self.root/'control',self.root/'workspace')
+            restarted.model_request({'payload':self.p},data,'/v1/chat/completions',10000)
+        self.assertEqual(req.call_count,3)  # original + one recovery; next call has no recovery
+        with self.c.db() as db:self.assertEqual(db.execute('SELECT status FROM model_recoveries').fetchone()[0],'empty')
+
+    def test_valid_reasoning_or_tool_completion_and_images_never_retried(self):
+        for msg in [{'content':'answer'},{'content':None,'reasoning_content':'thinking'},
+                    {'content':None,'tool_calls':[{'id':'1'}]}]:
+            raw=json.dumps({'choices':[{'message':msg,'finish_reason':'stop'}]}).encode()
+            with mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.request',return_value=(200,raw)) as req:
+                self.c.model_request({'payload':self.p},{'model':'gpt-6.1-sol','messages':[]},'/v1/chat/completions',10000)
+                self.assertEqual(req.call_count,1)
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.request',return_value=(200,b'{}')) as req:
+            self.c.model_request({'payload':self.p},{'model':'gpt-image-2.5'},'/v1/images/generations',10000)
+            self.assertEqual(req.call_count,1)
+
+    def test_empty_recovery_cannot_exceed_budget_or_change_task_model(self):
+        empty=json.dumps({'choices':[{'message':{'content':None},'finish_reason':'stop'}]}).encode()
+        data={'model':'gpt-6.1-sol','messages':[]}
+        with mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.request',return_value=(200,empty)) as req:
+            self.c.model_request({'payload':self.p,'models':32},data,'/v1/chat/completions',10000)
+            self.assertEqual(req.call_count,1)
+            with self.assertRaises(PermissionError):self.c.model_request({'payload':self.p},{**data,'model':'gpt-5.6-terra'},'/v1/chat/completions',10000)
+            self.assertEqual(req.call_count,1)
+
+    def test_empty_recovery_never_runs_after_grant_expiry_or_task_end(self):
+        empty=json.dumps({'choices':[{'message':{'content':None},'finish_reason':'stop'}]}).encode()
+        data={'model':'gpt-6.1-sol','messages':[]}
+        for ended,job in [(False,'b'*12),(True,'c'*12)]:
+            active={'payload':{**self.p,'job_id':job},'expires':time.monotonic()+(-1 if not ended else 60)}
+            self.c.active=None if ended else active
+            with mock.patch('nextcloud_talk_hermes_bridge.assistant_connector.request',return_value=(200,empty)) as req:
+                self.c.model_request(active,data,'/v1/chat/completions',10000)
+                self.assertEqual(req.call_count,1)
 
 
 if __name__=='__main__':unittest.main()

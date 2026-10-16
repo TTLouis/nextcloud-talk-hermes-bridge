@@ -78,6 +78,23 @@ existing handoff tools, and report useful next steps. The current request takes
 priority; unrelated previous work is not silently restarted. No `/new` reset,
 background monitoring, scheduled inference or broader API grants are added.
 
+## Empty model replies
+
+A confirmed empty Chat Completions `stop` (no visible text, reasoning, refusal
+or tool call) permits one additional completion recovery per job. The Connector
+durably reserves it before calling the same approved task model without
+streaming, retaining the conversation, attachments, tool schemas and owner
+attribution. A fixed continuation hint asks for an answer or the existing MCP
+tools; it grants no authority. Streaming-only options are removed, and recovered
+function IDs/arguments are converted back to SSE for the pinned Hermes SDK.
+
+Recovery uses the existing model-call budget and requires the task grant to
+remain active and unexpired. A restart cannot reserve a second recovery. Image
+generation requests and whole jobs are never replayed by this path; durable
+image claims still prevent duplicate generation in the same job. Exhaustion
+remains an incomplete outcome. Content-free diagnostics retain response counts,
+finish reasons and usage totals, without response text, reasoning or tool args.
+
 ## Mobile replies and readable output paths
 
 The agent is instructed to use short natural paragraphs and useful bullet points,
@@ -340,7 +357,7 @@ room: signed ingress still requires the stable UID and registered project, and
 connectors/delivery recheck the exact owner/helper participant set.
 
 Use `python -m unittest discover -s tests/secure -v` and the no-network disposable
-bridge-image test for 76 contracts. Actual endpoint tests cover native project
+bridge-image test for 161 contracts. Actual endpoint tests cover native project
 creation, rename, emoji/PNG avatar, assistant-authored thread attachment, correct
 owner download and negative permissions. A real task exercises MCP download,
 terminal calculation, text artifact delivery and process exit. A natural main
@@ -349,6 +366,13 @@ task, produced a budget artifact and reported back. Native MCP question → numb
 reaction → same-session resume passed; a separate task retained its budget and
 did not acquire the other task's test memory. The user confirmed real mobile
 image opening and a reaction choice with the correct confirmation reply.
+The response recovery contract also runs against the actual OpenAI SDK in a
+no-network disposable pinned Worker (`tests/worker/test_response_sdk.py`), using
+an injected empty stream and a scripted function-call recovery. A real main
+conversation generated one landscape image, delivered a helper-authored native
+attachment with owner-readable matching bytes, and processed the owner's real
+discard reaction without a formal save. The original provider-empty failure
+did not recur in that live run; the recovery branch was fault-injection tested.
 Mobile thread navigation, push notifications and each new user's actual
 onboarding require separate verification; don't infer them from backend tests.
 
