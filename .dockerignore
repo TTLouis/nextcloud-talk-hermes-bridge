@@ -15,3 +15,15 @@ dist
 build
 *.egg-info
 release
+
+# Private deployment state must not enter the Docker build context.
+secrets/
+state-*/
+control-*/
+workspace-*/
+web-browser/
+admin-runtime/
+admin-build/
+before-*/
+*baseline*.json
+*-verification.json

@@ -33,6 +33,10 @@ def tenant_configs(root):
             if not token or token in tokens:
                 raise ValueError('Dispatch tokens must be unique across tenants and roles')
             tokens.add(token)
+        if c.get('browser_url') or c.get('browser_token'):
+            assert c.get('browser_url')=='http://hermes-talk-browser:9120' and re.fullmatch('[a-f0-9]{64}',c.get('browser_token',''))
+            if c['browser_token'] in tokens:raise ValueError('Browser token must be unique per tenant')
+            tokens.add(c['browser_token'])
         identities.add(c['uid'])
         result[slug] = c
     assert len(delivery['tenants']) == len(result), 'Unregistered delivery tenant'
@@ -40,6 +44,7 @@ def tenant_configs(root):
 
 
 def compose_for_tenants(template, slugs):
+    browser_slugs = {slug for slug,c in slugs.items() if isinstance(c,dict) and c.get('browser_url')} if isinstance(slugs,dict) else set()
     slugs = list(slugs)
     if not slugs or len(set(slugs)) != len(slugs):
         raise ValueError('Expected unique tenants')
@@ -57,8 +62,10 @@ def compose_for_tenants(template, slugs):
             service['volumes'] = [v.replace('-ttauth', '-' + slug) for v in service['volumes']]
             service['networks'] = [n.replace('-ttauth', '-' + slug) for n in service['networks']]
             if role == 'runner':
+                if slug in browser_slugs:service['networks'].append('web-calls')
                 service['depends_on'] = {'worker-' + slug: {'condition': 'service_healthy'}, 'delivery': {'condition': 'service_healthy'}}
                 data['services']['bridge']['depends_on']['runner-' + slug] = {'condition': 'service_healthy'}
             data['services'][role + '-' + slug] = service
         data['networks']['worker-' + slug] = {'internal': True}
+    if browser_slugs:data['networks']['web-calls']={'external':True,'name':'hermes-talk-web-calls'}
     return data

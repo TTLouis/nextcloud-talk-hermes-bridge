@@ -218,7 +218,10 @@ or `重新介绍` displays the guide again without a model call or permission re
 Hermes runs general local file/terminal/todo/memory tools inside the worker.
 Its MCP facade provides `nextcloud_list`, `nextcloud_read_text`,
 `nextcloud_download`, `assistant_projects`, `handoff_project`, `project_tasks`,
-`ask_user`, `generate_image`, `present_file` and `propose_project_change`.
+`ask_user`, `generate_image`, `present_file`, `propose_project_change`,
+`web_search`, `web_read` and `web_download` when the optional public browser is
+configured. See [public research boundaries](browser/README.md) for exact-query
+choices, source provenance, download limits and Docker setup.
 Cloud files are read through the bound user's native
 Nextcloud API behind MCP; native ACLs continue to apply. The model cannot select
 another UID, another credential or a different destination server.

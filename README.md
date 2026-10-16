@@ -69,6 +69,18 @@ the agent receives no additional permissions.
 The current welcome messages and control commands are in Chinese. You can write
 ordinary requests in the language supported by your chosen model.
 
+## Public web research
+
+Ask the assistant to search public pages, read sources or download a public PDF,
+text file or image. Results include source links; downloads first stay in the
+task's private Docker scratchpad. Delivering an attachment and saving it to your
+drive remain separate steps.
+
+Assistant-drafted searches show the exact outgoing query as a reaction choice.
+The assistant can follow links it has found, but cannot silently construct a
+new URL containing private text. Browsing uses isolated Playwright CLI sessions
+and a public-only network proxy. See [web research and Docker setup](browser/README.md).
+
 ## Reading replies on a phone
 
 Replies use short paragraphs and useful bullet points, with key results, amounts,

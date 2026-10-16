@@ -27,8 +27,9 @@ from .assistant_outputs import ReadableOutputs,readable_filename
 from .assistant_replies import ReplyDetails
 from .assistant_vision import TalkImages
 from .assistant_coordination import Coordination
+from .assistant_web import PublicWeb
 
-class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettings):
+class Connector(PublicWeb,TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettings):
     def __init__(self,config,state,workspace):
         self.config=config;self.state=Path(state);self.workspace=Path(workspace)
         self.state.mkdir(parents=True,exist_ok=True);self.workspace.mkdir(parents=True,exist_ok=True)
@@ -49,6 +50,7 @@ class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettin
         self.init_outputs()
         self.init_replies()
         self.init_coordination()
+        self.init_web()
 
     @contextmanager
     def db(self):
@@ -97,6 +99,7 @@ class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettin
                     db.execute("UPDATE questions SET status='answered',answer=? WHERE id=?",(p['decision'],q['id']))
                     origin=db.execute('SELECT origin_job FROM question_models WHERE question_id=?',(q['id'],)).fetchone()
                     question_origin=origin['origin_job'] if origin else None
+                self.web_answer(p,q)
                 p={**p,'kind':'task','prompt':'用户通过 reaction 对问题「'+q['question']+'」选择了「'+p['decision']+'」。请在本任务继续处理。此选择只回答该问题，不是网盘读取或保存权限的授权。'}
                 kind='task'
             if kind=='status':
@@ -211,8 +214,10 @@ class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettin
                 if out not in self.active['questions']:self.active['questions'].append(out)
             return {'awaiting_user_choice':True,'question_id':ident,'instruction':'End this turn. Host will present emoji choices and resume this task.'}
         if name=='project_tasks':return {'tasks':self.tasks(p['room']),'includes_other_task_history':False}
+        if name in ('web_search','web_read','web_download'):return self.web_tool(a,name,args)
         if name.startswith('nextcloud_'):
             if self.consent() is not True:raise PermissionError('User has not consented to cloud reads')
+            self.mark_web_private(p)
             path=args.get('path','')
             if name=='nextcloud_list':return {'entries':self.nc.list(path)}
             if name=='nextcloud_read_text':return {'path':path,'untrusted_content':self.nc.download(path,256*1024).decode('utf-8')}
@@ -297,6 +302,8 @@ class Connector(TalkImages,Coordination,ReplyDetails,ReadableOutputs,ModelSettin
             headers={'Authorization':'Bearer '+self.config['delivery_token']},
             body={'room':room,'title':args['task_title'],'handoff':ident,'message':'主助理交接\n\n'+note})
         thread=int(target['thread']);destination=task_workspace(self.workspace,self.config['uid'],room,thread)
+        if self.private_web_context(p) or args.get('cloud_files') or args.get('scratch_files'):
+            self.mark_web_private({'room':room,'thread':thread})
         relative=str(destination.relative_to(self.workspace))+'/scratch/'
         write_workspace(self.workspace,relative+'HANDOFF.md',note.encode())
         copied=[]

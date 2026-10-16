@@ -9,6 +9,15 @@ from tenant_config import compose_for_tenants, tenant_configs
 
 
 class TenantDeploymentTests(unittest.TestCase):
+    def test_public_browser_network_is_only_added_to_registered_connectors(self):
+        template=json.loads((DEPLOY.parent/'compose.personal.yaml').read_text())
+        data=compose_for_tenants(template,{'ttauth':{'browser_url':'http://hermes-talk-browser:9120'},'mmfelix':{}})
+        self.assertIn('web-calls',data['services']['runner-ttauth']['networks'])
+        self.assertNotIn('web-calls',data['services']['runner-mmfelix']['networks'])
+        self.assertEqual(data['services']['worker-ttauth'],template['services']['worker-ttauth'])
+        self.assertEqual(data['services']['worker-mmfelix']['networks'],['worker-mmfelix'])
+        self.assertEqual(data['networks']['web-calls'],{'external':True,'name':'hermes-talk-web-calls'})
+
     def test_two_users_keep_separate_worker_networks_mounts_and_global_bridge(self):
         template = json.loads((DEPLOY.parent / 'compose.personal.yaml').read_text())
         data = compose_for_tenants(template, ['ttauth', 'mmfelix'])

@@ -35,3 +35,24 @@ To provision an explicitly authorized new user, run server-local
 then repeat native ACL/dispatch negative checks and run
 `deploy/onboard_tenant.py --slug SAFE_SLUG`. Never manufacture read consent or
 collect account passwords in Talk. Unknown accounts cannot self-enroll.
+
+
+## Optional public research
+
+[Playwright CLI browsing](browser/README.md) runs in a separate Docker project
+with a public-only egress proxy and no published port. The two additional
+containers receive no cloud/provider credential or user workspace mount.
+Only registered Connectors join its private call network; Workers retain
+their existing per-user network, mounts and privileges.
+
+`deploy/public_browser.py` builds the pinned sidecar and generates unique control
+tokens for already-registered users. The normal tenant renderer preserves these
+network attachments during upgrades. Newly provisioned users do not inherit
+another user's browser token; enable browsing explicitly after provisioning.
+
+Assistant-drafted outbound queries require a bound owner choice. Exact URLs and
+search terms supplied in the current native user message can be used directly;
+model-authored handoffs are not implicit user authorization. Page contents and
+downloads cannot grant drive reads/saves or account controls. Authentication
+material is blocked from public requests. Existing image-request claims still
+prevent duplicate billing; no model-empty result is automatically retried.
