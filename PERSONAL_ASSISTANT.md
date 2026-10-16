@@ -60,6 +60,18 @@ Finalization is serialized with bounded feedback sends so running notices cannot
 be emitted after the final result is released. Restarted in-flight jobs retain
 the existing interrupted/no-automatic-retry behavior.
 
+Queue/running text uses one helper-owned message per job. The existing
+connector-specific bearer controls a dedicated feedback route; worker/model
+grants cannot use it. Delivery state binds the message to its exact owner,
+room and thread. Before editing, the helper re-fetches the exact native message
+and verifies its own author and thread, without using moderator privileges.
+The first final text or choice card replaces the status message; cards keep
+their original authorization and reaction rules. A lost status receipt cannot
+discard a final answer. Different-thread results or interrupted jobs trigger
+bounded cleanup only after pending result notifications are delivered. Talk
+may show its native deletion marker. Historical untracked bot notices are not
+bulk-deleted. No API scopes, account permissions or model tools are added.
+
 The main assistant keeps its continuous context and is instructed to act on
 relevant, already-authorized next steps, organize independent work through the
 existing handoff tools, and report useful next steps. The current request takes

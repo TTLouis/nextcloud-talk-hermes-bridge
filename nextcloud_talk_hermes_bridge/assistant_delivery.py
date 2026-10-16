@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import threading
 from .secure_bridge import Server
 from .secure_runner import Handler as BaseHandler
 from .assistant_cloud import Cloud
@@ -17,6 +18,7 @@ class Delivery:
         self.config=config;self.state=Path(state);self.pid=None
         self.cloud=Cloud(config['nextcloud_url'],config['assistant_uid'],config['assistant_token'])
         self.registry=self.state/'bindings.json'
+        self.feedback_lock=threading.Lock()
         if self.registry.exists():
             bindings=json.loads(self.registry.read_text())
             for tenant in self.config['tenants']:
@@ -54,13 +56,56 @@ class Delivery:
         marker=self.state/('question-'+p['id']+'.json')
         if marker.exists():
             previous=json.loads(marker.read_text())
-            if previous['uid']!=tenant['uid'] or previous['room']!=p['room']:raise PermissionError('Wrong question owner')
+            if (previous['uid'],previous['room'],previous['thread'])!=(tenant['uid'],p['room'],p['thread']):raise PermissionError('Wrong question owner')
             return previous
+        if p.get('feedback_id'):
+            result=self.feedback(tenant,{**p,'id':p['feedback_id'],'phase':'finish'})
+            if result.get('message_id'):
+                marker.write_text(json.dumps(result));return result
         fields={'message':p['message'],'referenceId':'choice-'+p['id']}
         if p['thread']:fields['threadId']=p['thread']
         result=self.cloud.ocs('apps/spreed/api/v1/chat/'+p['room'],fields,'POST')
         out={'uid':tenant['uid'],'room':p['room'],'thread':p['thread'],'message_id':int(result['id'])}
         marker.write_text(json.dumps(out));return out
+
+    def feedback(self,tenant,p):
+        # This control route is connector-only; models cannot supply a message ID.
+        if p.get('room') not in tenant['rooms']:raise PermissionError('Unbound feedback')
+        context_key(tenant['uid'],p['room'],p['thread'])
+        if not re.fullmatch('[a-f0-9]{12}',p.get('id','')):raise ValueError('Invalid feedback ID')
+        phase=p.get('phase')
+        if phase not in ('update','finish','delete'):raise ValueError('Invalid feedback phase')
+        text=p.get('message','')
+        if phase!='delete' and (not isinstance(text,str) or not 0<len(text)<=6000):raise ValueError('Invalid feedback text')
+        self.cloud.room(p['room'],tenant['uid'],self.config['assistant_uid'])
+        marker=self.state/('feedback-'+p['id']+'.json')
+        with self.feedback_lock:
+            old=json.loads(marker.read_text()) if marker.exists() else None
+            if old and (old['uid'],old['room'],old['thread'])!=(tenant['uid'],p['room'],p['thread']):raise PermissionError('Wrong feedback owner')
+            if old and old.get('closed'):return old
+            if old:
+                endpoint='apps/spreed/api/v1/chat/'+p['room']+'/'+str(old['message_id'])
+                # Re-fetch precisely this message; never use moderator authority to
+                # edit another actor or a different thread, even with corrupt state.
+                messages=self.cloud.ocs(endpoint+'/context?limit=0') or []
+                item=next((m for m in messages if int(m['id'])==old['message_id']),None)
+                if item is None:
+                    if phase=='delete':old['closed']=True;marker.write_text(json.dumps(old));return old
+                    raise PermissionError('Feedback message missing')
+                native_thread=int(item.get('threadId',0))
+                if native_thread==old['message_id']:native_thread=0
+                if item.get('actorType')!='users' or item.get('actorId')!=self.config['assistant_uid'] or native_thread!=p['thread']:
+                    raise PermissionError('Feedback message identity changed')
+                if phase=='delete':self.cloud.ocs(endpoint,{},'DELETE')
+                else:self.cloud.ocs(endpoint,{'message':text},'PUT')
+                out={**old,'closed':phase!='update'}
+            elif phase!='update':return {'closed':True}
+            else:
+                fields={'message':text,'referenceId':'feedback-'+p['id'],'silent':True}
+                if p['thread']:fields['threadId']=p['thread']
+                result=self.cloud.ocs('apps/spreed/api/v1/chat/'+p['room'],fields,'POST')
+                out={'uid':tenant['uid'],'room':p['room'],'thread':p['thread'],'message_id':int(result['id']),'closed':False}
+            marker.write_text(json.dumps(out));return out
 
     def execute(self,p,tenant=None):
         # Tenant comes from a connector-specific bearer, never from the model's chosen UID.
@@ -89,7 +134,7 @@ class Delivery:
 
 class Handler(BaseHandler):
     def do_POST(self):
-        if self.path not in ('/deliver','/bind','/start-thread','/question'):self.reply(404,{});return
+        if self.path not in ('/deliver','/bind','/start-thread','/question','/feedback'):self.reply(404,{});return
         tenants=self.server.runner.config['tenants']
         tenant=next((t for t in tenants if hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+t['token'])),None)
         if not tenant:self.reply(401,{});return
@@ -102,6 +147,7 @@ class Handler(BaseHandler):
             if self.path=='/bind':self.reply(200,self.server.runner.bind(tenant,parsed['room']))
             elif self.path=='/start-thread':self.reply(200,self.server.runner.start_thread(tenant,parsed))
             elif self.path=='/question':self.reply(200,self.server.runner.question(tenant,parsed))
+            elif self.path=='/feedback':self.reply(200,self.server.runner.feedback(tenant,parsed))
             else:self.reply(200,self.server.runner.execute(parsed,tenant))
         except PermissionError:self.reply(403,{'error':'Not authorized'})
         except (ValueError,KeyError,TypeError):self.reply(400,{'error':'Invalid delivery'})

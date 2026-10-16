@@ -58,9 +58,13 @@ own task and can only be answered by its owner.
 
 A 👀 reaction acknowledges a newly queued task. If it waits more than 15 seconds,
 the assistant sends a queue notice. Tasks still running after 3 seconds receive
-a processing notice, followed by an update every 3 minutes while needed. These
-status messages use the existing bot permissions and do not make model calls.
-They do not show another user's tasks or queue details.
+one processing message, updated every 3 minutes while needed. The assistant
+edits that same message into the first final answer or decision card, keeping
+the conversation compact. If the answer belongs in a different thread, the
+temporary message is deleted after delivery. Native Talk may retain a deletion
+marker in that uncommon case. Status updates do not call a model or reveal
+another user's tasks. They use the existing non-admin delivery account;
+the agent receives no additional permissions.
 
 The current welcome messages and control commands are in Chinese. You can write
 ordinary requests in the language supported by your chosen model.

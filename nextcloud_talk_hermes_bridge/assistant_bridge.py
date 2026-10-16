@@ -218,15 +218,22 @@ class Bridge(TaskFeedback,BaseBridge):
         with self.db() as db:row=db.execute("SELECT * FROM notifications WHERE status='pending' AND next_attempt<=? ORDER BY rowid LIMIT 1",(time.time(),)).fetchone()
         if not row:return False
         try:
+            feedback=self.notification_feedback(row)
             if row['choice']:
                 choice=json.loads(row['choice']);b=self.bindings[(choice['uid'],row['room'])]
+                body={'uid':choice['uid'],'room':row['room'],'thread':row['thread'],
+                    'job_id':hashlib.sha256(row['id'].encode()).hexdigest()[:12],'message':row['message']}
+                if feedback:body['feedback_id']=feedback['id']
                 _,receipt=json_request(b['runner_url']+'/question',method='POST',timeout=70,
-                    headers={'Authorization':'Bearer '+b['runner_token']},body={'uid':choice['uid'],'room':row['room'],'thread':row['thread'],
-                    'job_id':hashlib.sha256(row['id'].encode()).hexdigest()[:12],'message':row['message']})
+                    headers={'Authorization':'Bearer '+b['runner_token']},body=body)
                 with self.db() as db:db.execute('INSERT OR IGNORE INTO choices VALUES (?,?,?,?,?,?,?,?,?,?)',
                     (row['room'],receipt['message_id'],choice['uid'],row['thread'],choice['execution_room'],choice['execution_thread'],json.dumps(choice['options']),choice['group'],'pending',None))
                 for emoji in choice['options']:self.react(row['room'],receipt['message_id'],emoji)
+            elif feedback:
+                receipt=self.feedback_request(feedback,row['room'],row['thread'],'finish',row['message'])
+                if not receipt.get('message_id'):self.post(row['room'],row['message'],row['reply'],row['thread'],row['title'])
             else:self.post(row['room'],row['message'],row['reply'],row['thread'],row['title'])
+            if feedback:self.close_feedback(feedback['id'])
             with self.db() as db:db.execute("UPDATE notifications SET status='sent' WHERE id=?",(row['id'],))
         except Exception:
             with self.db() as db:db.execute('UPDATE notifications SET attempts=attempts+1,next_attempt=? WHERE id=?',(time.time()+min(60,10*(row['attempts']+1)),row['id']))

@@ -45,33 +45,33 @@ class FeedbackTests(unittest.TestCase):
     def test_queued_and_running_notices_describe_actual_state_and_are_rate_limited(self):
         ident=self.enqueue()
         with self.b.db() as db:db.execute('UPDATE jobs SET created=100 WHERE id=?',(ident,))
-        with mock.patch.object(self.b,'react'),mock.patch.object(self.b,'post') as post:
+        with mock.patch.object(self.b,'react'),mock.patch.object(self.b,'status_message') as post:
             self.b.flush_feedback(now=100)
             self.assertFalse(self.b.flush_feedback(now=114))
             self.b.flush_feedback(now=115)
-            self.assertIn('排队',post.call_args.args[1]);self.assertFalse(self.b.flush_feedback(now=120))
+            self.assertIn('排队',post.call_args.args[3]);self.assertFalse(self.b.flush_feedback(now=120))
             self.running(ident,130)
             self.assertFalse(self.b.flush_feedback(now=132))
-            self.b.flush_feedback(now=133);self.assertIn('正在处理',post.call_args.args[1])
+            self.b.flush_feedback(now=133);self.assertIn('正在处理',post.call_args.args[3])
             self.assertFalse(self.b.flush_feedback(now=312))
-            self.b.flush_feedback(now=313);self.assertIn('仍在处理',post.call_args.args[1])
+            self.b.flush_feedback(now=313);self.assertIn('仍在处理',post.call_args.args[3])
             self.assertEqual(post.call_count,3)
 
     def test_two_users_and_project_thread_keep_distinct_status_destinations_without_quotes(self):
         alice=self.enqueue(room='proj123',thread=9);bob=self.enqueue(uid='bob',room='main456',mid=2)
-        with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'post') as post:
+        with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'status_message') as post:
             self.b.flush_feedback(now=100);self.b.flush_feedback(now=100)
             self.assertEqual([c.args[:2] for c in react.call_args_list],[('proj123',1),('main456',2)])
             self.running(alice);self.running(bob)
             self.b.flush_feedback(now=103);self.b.flush_feedback(now=103)
-            self.assertEqual([(c.args[0],c.kwargs['thread']) for c in post.call_args_list],[('proj123',9),('main456',0)])
+            self.assertEqual([(c.args[1],c.args[2]) for c in post.call_args_list],[('proj123',9),('main456',0)])
             for call in post.call_args_list:
-                self.assertNotIn('reply',call.kwargs);self.assertNotIn('work',call.args[1]);self.assertNotIn('bob',call.args[1])
+                self.assertNotIn('reply',call.kwargs);self.assertNotIn('work',call.args[3]);self.assertNotIn('bob',call.args[3])
 
     def test_other_users_binding_cannot_be_used_for_feedback(self):
         ident=self.enqueue()
         with self.b.db() as db:db.execute('UPDATE jobs SET reply_room=?,reply_thread=0 WHERE id=?',('main456',ident))
-        with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'post') as post:
+        with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'status_message') as post:
             self.assertFalse(self.b.flush_feedback(now=9999999999));react.assert_not_called();post.assert_not_called()
 
     def test_mirrored_answer_acknowledges_its_real_card_room_and_resumes_exact_task(self):
@@ -79,10 +79,10 @@ class FeedbackTests(unittest.TestCase):
             ('main123',99,'alice',0,'proj123',9,json.dumps({'1️⃣':{'kind':'answer','artifact':'a'*12,'decision':'A'}}),'answer:x','pending',None))
         ident,_=self.b.enqueue({'reaction':True,'uid':'alice','room':'main123','message_id':99,'emoji':'1️⃣'.replace('\ufe0f','')})
         self.assertEqual((self.row(ident)['room'],self.row(ident)['thread']),('proj123',9))
-        with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'post') as post:
+        with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'status_message') as post:
             self.b.flush_feedback(now=100);react.assert_called_once_with('main123',99,'👀',timeout=5)
             self.running(ident);self.b.flush_feedback(now=103)
-            self.assertEqual((post.call_args.args[0],post.call_args.kwargs['thread']),('main123',0))
+            self.assertEqual((post.call_args.args[1],post.call_args.args[2]),('main123',0))
 
     def test_status_emoji_never_resolves_a_choice_or_launches_a_task(self):
         with self.b.db() as db:db.execute('INSERT INTO choices VALUES (?,?,?,?,?,?,?,?,?,?)',
@@ -108,7 +108,7 @@ class FeedbackTests(unittest.TestCase):
         self.enqueue(message='模型')
         task=self.enqueue(mid=2)
         with self.b.db() as db:db.execute("UPDATE jobs SET status='awaiting_onboarding' WHERE id=?",(task,))
-        with mock.patch.object(self.b,'react'),mock.patch.object(self.b,'post') as post:
+        with mock.patch.object(self.b,'react'),mock.patch.object(self.b,'status_message') as post:
             self.b.flush_feedback(now=100);self.assertFalse(self.b.flush_feedback(now=9999999999));post.assert_not_called()
         with self.b.db() as db:self.assertEqual(db.execute('SELECT COUNT(*) FROM task_feedback').fetchone()[0],1)
 
@@ -127,13 +127,13 @@ class FeedbackTests(unittest.TestCase):
         def execute(*a,**kw):
             entered.set();release.wait(5);return 200,{'message':'done'}
         with mock.patch('nextcloud_talk_hermes_bridge.assistant_bridge.json_request',side_effect=execute) as model, \
-             mock.patch.object(self.b,'react'),mock.patch.object(self.b,'post',side_effect=lambda *a,**kw:messages.append((a,kw))):
+             mock.patch.object(self.b,'react'),mock.patch.object(self.b,'status_message',side_effect=lambda *a,**kw:messages.append((a,kw))):
             worker=threading.Thread(target=self.b.run_one);worker.start()
             try:
                 self.assertTrue(entered.wait(2));self.assertFalse(self.b.run_one())
                 with self.b.db() as db:db.execute('UPDATE task_feedback SET started=100,next_notice=103 WHERE job_id=?',(alice,))
                 self.b.flush_feedback(now=103);self.b.flush_feedback(now=103);self.b.flush_feedback(now=103)
-                self.assertTrue(any('正在处理' in a[1] and kw['thread']==9 for a,kw in messages))
+                self.assertTrue(any('正在处理' in a[3] and a[2]==9 for a,kw in messages))
                 self.assertTrue(worker.is_alive());model.assert_called_once()
             finally:release.set();worker.join(3)
             self.assertFalse(worker.is_alive())
@@ -142,7 +142,7 @@ class FeedbackTests(unittest.TestCase):
         ident=self.enqueue();self.running(ident)
         for state in ['done','failed','interrupted']:
             self.b.finish_job(ident,state)
-            with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'post') as post:
+            with mock.patch.object(self.b,'react') as react,mock.patch.object(self.b,'status_message') as post:
                 self.assertFalse(self.b.flush_feedback(now=9999999999));react.assert_not_called();post.assert_not_called()
 
     def test_restart_does_not_resume_running_jobs_or_replay_their_notices(self):
@@ -168,7 +168,7 @@ class FeedbackTests(unittest.TestCase):
         sending=threading.Event();release=threading.Event();finished=threading.Event()
         def post(*a,**kw):sending.set();release.wait(5)
         def finish():self.b.finish_job(ident,'done');finished.set()
-        with mock.patch.object(self.b,'post',side_effect=post):
+        with mock.patch.object(self.b,'status_message',side_effect=post):
             sender=threading.Thread(target=lambda:self.b.flush_feedback(now=103));sender.start()
             finalizer=threading.Thread(target=finish)
             try:
@@ -178,7 +178,7 @@ class FeedbackTests(unittest.TestCase):
                 release.set();sender.join(2)
                 if finalizer.ident is not None:finalizer.join(2)
         self.assertTrue(finished.is_set());self.assertEqual(self.row(ident)['status'],'done')
-        with mock.patch.object(self.b,'post') as post:
+        with mock.patch.object(self.b,'status_message') as post:
             self.assertFalse(self.b.flush_feedback(now=9999999999));post.assert_not_called()
 
 

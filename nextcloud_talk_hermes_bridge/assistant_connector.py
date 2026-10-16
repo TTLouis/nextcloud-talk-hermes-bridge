@@ -375,15 +375,18 @@ class Handler(BaseHandler):
         super().do_GET()
 
     def do_POST(self):
-        if self.path=='/question':
+        if self.path in ('/question','/feedback'):
             c=self.server.runner
             if not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+c.config['runner_token']):self.reply(401,{});return
             try:
                 length=int(self.headers.get('Content-Length','0'))
                 if self.headers.get('Transfer-Encoding') or not 0<length<=65536:self.reply(413,{});return
                 p=json.loads(self.rfile.read(length));c.authorize(p)
-                _,receipt=json_request(c.config['delivery_url']+'/question',method='POST',timeout=60,
-                    headers={'Authorization':'Bearer '+c.config['delivery_token']},body={'room':p['room'],'thread':p['thread'],'id':p['job_id'],'message':p['message']})
+                body={'room':p['room'],'thread':p['thread'],'id':p['job_id'],'message':p.get('message','')}
+                if self.path=='/feedback':body['phase']=p['phase']
+                elif p.get('feedback_id'):body['feedback_id']=p['feedback_id']
+                _,receipt=json_request(c.config['delivery_url']+self.path,method='POST',timeout=15 if self.path=='/feedback' else 60,
+                    headers={'Authorization':'Bearer '+c.config['delivery_token']},body=body)
                 self.reply(200,receipt)
             except PermissionError:self.reply(403,{'error':'Question is not authorized'})
             except Exception:self.reply(500,{'error':'Question delivery failed'})
